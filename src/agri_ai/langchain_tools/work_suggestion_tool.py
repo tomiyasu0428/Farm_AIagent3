@@ -9,6 +9,9 @@ import logging
 
 from .base_tool import AgriAIBaseTool
 from ..utils.query_parser import QueryParser
+from ..database.data_access import DataAccessLayer
+from ..core.error_handler import ErrorHandler
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,12 @@ class WorkSuggestionTool(AgriAIBaseTool):
         "作業提案や農薬ローテーション、天候を考慮した作業計画を提案します。"
         "使用例: '来週の作業提案', '防除薬剤のローテーション', '天候を考慮した作業計画'"
     )
+    
+    data_access: Any = Field(default=None, exclude=True)
+
+    def __init__(self, mongodb_client_instance=None):
+        super().__init__(mongodb_client_instance)
+        self.data_access = DataAccessLayer(self.mongodb_client)
 
     async def _execute(self, query: str) -> Dict[str, Any]:
         """作業提案の実行"""
@@ -40,8 +49,7 @@ class WorkSuggestionTool(AgriAIBaseTool):
                 return await self._suggest_general_work(query)
 
         except Exception as e:
-            logger.error(f"作業提案エラー: {e}")
-            return {"error": f"作業提案中にエラーが発生しました: {str(e)}"}
+            return ErrorHandler.handle_tool_error(e, "WorkSuggestionTool", "作業提案")
 
     def _parse_suggestion_query(self, query: str) -> str:
         """クエリから提案タイプを判定"""
@@ -406,15 +414,7 @@ class WorkSuggestionTool(AgriAIBaseTool):
 
     async def _get_crop_name(self, crop_id: ObjectId) -> str:
         """作物名を取得"""
-        try:
-            if not crop_id:
-                return "不明"
-
-            crops_collection = await self._get_collection("crops")
-            crop = await crops_collection.find_one({"_id": crop_id})
-            return crop.get("name", "不明") if crop else "不明"
-        except Exception:
-            return "不明"
+        return await self.data_access.get_crop_name(crop_id)
 
     async def _suggest_general_work(self, query: str) -> Dict[str, Any]:
         """一般的な作業提案"""

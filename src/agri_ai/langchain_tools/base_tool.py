@@ -22,9 +22,12 @@ class AgriAIBaseTool(BaseTool, ABC):
     class Config:
         arbitrary_types_allowed = True
 
-    def __init__(self, **kwargs):
+    def __init__(self, mongodb_client_instance=None, **kwargs):
         # mongodb_client を明示的に設定
-        kwargs.setdefault("mongodb_client", mongodb_client)
+        if mongodb_client_instance is not None:
+            kwargs["mongodb_client"] = mongodb_client_instance
+        else:
+            kwargs.setdefault("mongodb_client", mongodb_client)
         super().__init__(**kwargs)
 
     async def _get_collection(self, collection_name: str):

@@ -48,6 +48,30 @@ class QueryParser:
             '摘芯': ['摘芯', '芯止め'],
             '誘引': ['誘引', '支柱立て'],
         }
+        
+        # 作物名パターン
+        self.crop_patterns = [
+            r'(トマト|ミニトマト)',
+            r'(きゅうり|キュウリ)',
+            r'(なす|ナス)',
+            r'(ピーマン|パプリカ)',
+            r'(レタス|サニーレタス)',
+            r'(キャベツ|白菜)',
+            r'(人参|にんじん|ニンジン)',
+            r'(大根|だいこん)',
+            r'(玉ねぎ|たまねぎ)',
+            r'(じゃがいも|ジャガイモ)',
+        ]
+        
+        # 資材名パターン
+        self.material_patterns = [
+            r'(殺虫剤|農薬)',
+            r'(殺菌剤|防除剤)',
+            r'(除草剤)',
+            r'(肥料|追肥)',
+            r'(有機肥料|化成肥料)',
+            r'(農薬|薬剤)',
+        ]
     
     def parse_date_query(self, query: str) -> Optional[Dict[str, Any]]:
         """日付関連クエリの解析"""
@@ -225,6 +249,30 @@ class QueryParser:
             else:
                 end_of_next_month = start_of_next_month.replace(month=today.month + 2)
         return start_of_next_month, end_of_next_month
+    
+    def extract_crop_name(self, query: str) -> Optional[str]:
+        """作物名抽出の共通メソッド"""
+        try:
+            for pattern in self.crop_patterns:
+                match = re.search(pattern, query)
+                if match:
+                    return match.group(1)
+            return None
+        except Exception as e:
+            logger.error(f"作物名抽出エラー: {e}")
+            return None
+    
+    def extract_material_name(self, query: str) -> Optional[str]:
+        """資材名抽出の共通メソッド"""
+        try:
+            for pattern in self.material_patterns:
+                match = re.search(pattern, query)
+                if match:
+                    return match.group(1)
+            return None
+        except Exception as e:
+            logger.error(f"資材名抽出エラー: {e}")
+            return None
 
 
 # グローバルインスタンス

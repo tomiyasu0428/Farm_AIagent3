@@ -41,7 +41,7 @@ async def test_task_lookup_tool():
     """TaskLookupToolのテスト"""
     print("\n📋 TaskLookupToolをテスト中...")
     
-    tool = TaskLookupTool()
+    tool = TaskLookupTool(mongodb_client_instance=mongodb_client)
     
     test_queries = [
         "今日のタスク",
@@ -63,7 +63,7 @@ async def test_task_update_tool():
     """TaskUpdateToolのテスト"""
     print("\n✏️ TaskUpdateToolをテスト中...")
     
-    tool = TaskUpdateTool()
+    tool = TaskUpdateTool(mongodb_client_instance=mongodb_client)
     
     test_queries = [
         "防除作業終わりました",
@@ -84,7 +84,7 @@ async def test_field_info_tool():
     """FieldInfoToolのテスト"""
     print("\n🚜 FieldInfoToolをテスト中...")
     
-    tool = FieldInfoTool()
+    tool = FieldInfoTool(mongodb_client_instance=mongodb_client)
     
     test_queries = [
         "第1ハウスの状況",
@@ -105,7 +105,7 @@ async def test_crop_material_tool():
     """CropMaterialToolのテスト"""
     print("\n🌱 CropMaterialToolをテスト中...")
     
-    tool = CropMaterialTool()
+    tool = CropMaterialTool(mongodb_client_instance=mongodb_client)
     
     test_queries = [
         "トマトに使える農薬",

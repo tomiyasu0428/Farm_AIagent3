@@ -8,6 +8,9 @@ import logging
 
 from .base_tool import AgriAIBaseTool
 from ..utils.query_parser import query_parser
+from ..database.data_access import DataAccessLayer
+from ..core.error_handler import ErrorHandler
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,12 @@ class CropMaterialTool(AgriAIBaseTool):
         "作物に適用可能な資材や希釈倍率を検索します。"
         "使用例: 'トマトに使える農薬', 'ダコニールの希釈倍率', 'キュウリの防除薬剤'"
     )
+    
+    data_access: Any = Field(default=None, exclude=True)
+
+    def __init__(self, mongodb_client_instance=None):
+        super().__init__(mongodb_client_instance)
+        self.data_access = DataAccessLayer(self.mongodb_client)
 
     async def _execute(self, query: str) -> Dict[str, Any]:
         """作物-資材対応の実行"""
@@ -38,8 +47,7 @@ class CropMaterialTool(AgriAIBaseTool):
                 return await self._general_search(query)
 
         except Exception as e:
-            logger.error(f"作物-資材検索エラー: {e}")
-            return {"error": f"エラーが発生しました: {str(e)}"}
+            return ErrorHandler.handle_tool_error(e, "CropMaterialTool", "作物-資材検索")
 
     def _determine_query_type(self, query: str) -> str:
         """クエリの種類を判定"""
@@ -236,40 +244,11 @@ class CropMaterialTool(AgriAIBaseTool):
 
     def _extract_crop_name(self, query: str) -> str:
         """クエリから作物名を抽出"""
-        crop_keywords = ["トマト", "キュウリ", "ナス", "ピーマン", "イチゴ", "レタス", "キャベツ", "白菜"]
-
-        for crop in crop_keywords:
-            if crop in query:
-                return crop
-
-        return None
+        return query_parser.extract_crop_name(query)
 
     def _extract_material_name(self, query: str) -> str:
         """クエリから資材名を抽出"""
-        # 一般的な資材名のパターン
-        material_patterns = [
-            "ダコニール",
-            "モレスタン",
-            "ベンレート",
-            "オーソサイド",
-            "アミスター",
-            "ストロビー",
-            "フルピカ",
-            "トップジン",
-        ]
-
-        for material in material_patterns:
-            if material in query:
-                return material
-
-        # 数字が含まれる場合（例：ダコニール1000）
-        import re
-
-        material_with_number = re.search(r"([ァ-ヶー]+\d*)", query)
-        if material_with_number:
-            return material_with_number.group(1)
-
-        return None
+        return query_parser.extract_material_name(query)
 
     def _format_result(self, result: Dict[str, Any]) -> str:
         """結果のフォーマット"""
