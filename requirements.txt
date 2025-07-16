@@ -1,8 +1,7 @@
 # AI・機械学習関連
 langchain>=0.1.0
-langchain-openai>=0.1.0
-langchain-anthropic>=0.1.0
-openai>=1.0.0
+langchain-google-genai>=1.0.0
+google-generativeai>=0.3.0
 
 # データベース関連
 pymongo>=4.6.0
@@ -23,6 +22,7 @@ google-cloud-functions>=1.15.0
 pandas>=2.1.0
 numpy>=1.25.0
 pydantic>=2.5.0
+dateparser>=1.1.8
 
 # 開発・テスト用
 pytest>=7.4.0

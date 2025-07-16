@@ -5,7 +5,7 @@ LangChainエージェントのコア実装
 from typing import List, Dict, Any, Optional
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 import logging
 
 from .config import settings
@@ -31,10 +31,10 @@ class AgriAIAgent:
             await mongodb_client.connect()
             
             # LLMの初期化
-            self.llm = ChatOpenAI(
-                model="gpt-4",
+            self.llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
                 temperature=0.1,
-                openai_api_key=settings.openai_api_key,
+                google_api_key=settings.google_api_key,
                 timeout=settings.ai_response_timeout
             )
             

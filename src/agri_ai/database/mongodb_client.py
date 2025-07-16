@@ -16,24 +16,40 @@ logger = logging.getLogger(__name__)
 class MongoDBClient:
     """MongoDB接続クライアント"""
     
-    def __init__(self):
+    def __init__(self, connection_string: Optional[str] = None):
+        self.connection_string = connection_string or settings.mongodb_connection_string
         self.client: Optional[AsyncIOMotorClient] = None
         self.database: Optional[AsyncIOMotorDatabase] = None
         
+    async def __aenter__(self):
+        """非同期コンテキストマネージャーの開始"""
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """非同期コンテキストマネージャーの終了"""
+        await self.disconnect()
+        
     async def connect(self) -> None:
         """MongoDB接続の確立"""
+        if self.client:
+            logger.debug("MongoDB接続は既に確立されています")
+            return
+            
         try:
+            mongo_settings = settings.mongodb
+            
             self.client = AsyncIOMotorClient(
-                settings.mongodb_connection_string,
-                serverSelectionTimeoutMS=5000,  # 5秒でタイムアウト
-                connectTimeoutMS=10000,         # 10秒でタイムアウト
-                maxPoolSize=50,                 # 最大接続プール数
-                minPoolSize=5,                  # 最小接続プール数
+                self.connection_string,
+                serverSelectionTimeoutMS=mongo_settings.server_selection_timeout,
+                connectTimeoutMS=mongo_settings.connect_timeout,
+                maxPoolSize=mongo_settings.max_pool_size,
+                minPoolSize=mongo_settings.min_pool_size,
             )
             
             # 接続テスト
             await self.client.admin.command('ping')
-            self.database = self.client[settings.mongodb_database_name]
+            self.database = self.client[mongo_settings.database_name]
             
             logger.info("MongoDB接続が正常に確立されました")
             
@@ -45,6 +61,8 @@ class MongoDBClient:
         """MongoDB接続の切断"""
         if self.client:
             self.client.close()
+            self.client = None
+            self.database = None
             logger.info("MongoDB接続を切断しました")
     
     async def get_collection(self, collection_name: str):
@@ -73,7 +91,18 @@ class MongoDBClient:
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
+    
+    @property
+    def is_connected(self) -> bool:
+        """接続状態の確認"""
+        return self.client is not None and self.database is not None
 
 
-# グローバルMongoDBクライアントインスタンス
+# ファクトリー関数
+def create_mongodb_client(connection_string: Optional[str] = None) -> MongoDBClient:
+    """MongoDBクライアントのファクトリー関数"""
+    return MongoDBClient(connection_string)
+
+
+# グローバルMongoDBクライアントインスタンス（後方互換性のため）
 mongodb_client = MongoDBClient()

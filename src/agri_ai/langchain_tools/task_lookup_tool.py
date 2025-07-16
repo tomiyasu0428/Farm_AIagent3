@@ -2,12 +2,12 @@
 タスク検索ツール (T1: TaskLookupTool)
 """
 
-from datetime import datetime, timedelta
 from typing import Any, Dict, List
 from pydantic import Field
 import logging
 
 from .base_tool import AgriAIBaseTool
+from ..utils.query_parser import query_parser
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ class TaskLookupTool(AgriAIBaseTool):
     async def _execute(self, query: str) -> List[Dict[str, Any]]:
         """タスク検索の実行"""
         try:
-            # クエリの解析
-            search_params = self._parse_query(query)
+            # 改良されたクエリ解析を使用
+            parsed_query = query_parser.parse_comprehensive_query(query)
             
             # scheduled_tasksコレクションから検索
             scheduled_tasks_collection = await self._get_collection("scheduled_tasks")
@@ -34,12 +34,34 @@ class TaskLookupTool(AgriAIBaseTool):
             filter_conditions = {"status": "pending"}
             
             # 日付範囲の設定
-            if search_params.get("date_range"):
-                filter_conditions["scheduled_date"] = search_params["date_range"]
+            date_component = parsed_query.get("parsed_components", {}).get("date")
+            if date_component:
+                filter_conditions["scheduled_date"] = date_component["date_range"]
             
             # 圃場指定の設定
-            if search_params.get("field_filter"):
-                filter_conditions["field_id"] = search_params["field_filter"]
+            field_component = parsed_query.get("parsed_components", {}).get("field")
+            if field_component:
+                if field_component.get("all_fields"):
+                    # 全圃場の場合は特別な処理は不要
+                    pass
+                elif field_component.get("field_filter"):
+                    # 圃場名での検索の場合、まず圃場IDを取得
+                    field_ids = await self._get_field_ids_by_name(field_component["field_filter"])
+                    if field_ids:
+                        filter_conditions["field_id"] = {"$in": field_ids}
+                    else:
+                        # 該当する圃場がない場合
+                        return []
+            
+            # 作業種別の設定
+            work_types = parsed_query.get("parsed_components", {}).get("work_types")
+            if work_types:
+                filter_conditions["work_type"] = {"$in": work_types}
+            
+            # 優先度の設定
+            priority = parsed_query.get("parsed_components", {}).get("priority")
+            if priority:
+                filter_conditions["priority"] = priority
             
             # タスクの検索
             tasks = await scheduled_tasks_collection.find(filter_conditions).to_list(100)
@@ -65,41 +87,15 @@ class TaskLookupTool(AgriAIBaseTool):
             logger.error(f"タスク検索エラー: {e}")
             return []
     
-    def _parse_query(self, query: str) -> Dict[str, Any]:
-        """クエリの解析"""
-        params = {}
-        
-        # 今日のタスク
-        if "今日" in query:
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            tomorrow = today + timedelta(days=1)
-            params["date_range"] = {"$gte": today, "$lt": tomorrow}
-        
-        # 明日のタスク
-        elif "明日" in query:
-            tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-            day_after_tomorrow = tomorrow + timedelta(days=1)
-            params["date_range"] = {"$gte": tomorrow, "$lt": day_after_tomorrow}
-        
-        # 今週のタスク
-        elif "今週" in query:
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            # 今週の日曜日を計算
-            days_since_sunday = today.weekday() + 1 if today.weekday() != 6 else 0
-            start_of_week = today - timedelta(days=days_since_sunday)
-            end_of_week = start_of_week + timedelta(days=7)
-            params["date_range"] = {"$gte": start_of_week, "$lt": end_of_week}
-        
-        # 圃場の指定
-        field_keywords = ["A畑", "B畑", "C畑", "ハウス", "第1", "第2"]
-        for keyword in field_keywords:
-            if keyword in query:
-                # 実際の実装では、圃場名からObjectIdを取得する必要があります
-                # ここでは簡略化
-                params["field_filter"] = {"$regex": keyword}
-                break
-        
-        return params
+    async def _get_field_ids_by_name(self, field_filter: Dict[str, Any]) -> List[Any]:
+        """圃場名から圃場IDを取得"""
+        try:
+            fields_collection = await self._get_collection("fields")
+            fields = await fields_collection.find(field_filter, {"_id": 1}).to_list(100)
+            return [field["_id"] for field in fields]
+        except Exception as e:
+            logger.error(f"圃場ID取得エラー: {e}")
+            return []
     
     async def _get_field_info(self, field_id) -> Dict[str, Any]:
         """圃場情報の取得"""

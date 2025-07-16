@@ -21,7 +21,7 @@ LINE Bot を通じて農業作業を支援するAIエージェントシステム
 - **MongoDB**: データベース
 - **FastAPI**: Web APIフレームワーク  
 - **LINE Bot SDK**: LINE連携
-- **OpenAI GPT-4**: 大規模言語モデル
+- **Google Gemini 2.5 Flash**: 大規模言語モデル
 
 ## セットアップ
 
@@ -43,7 +43,7 @@ pip install -r requirements.txt
 `.env.example` を `.env` にコピーして、以下の値を設定してください：
 
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
 MONGODB_CONNECTION_STRING=mongodb+srv://username:password@cluster.mongodb.net/agri_ai
 LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token_here
 LINE_CHANNEL_SECRET=your_line_channel_secret_here

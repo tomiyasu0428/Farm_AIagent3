@@ -21,7 +21,7 @@ The system is designed with the following components:
 ### Core Technology Stack
 - **Language**: Python 3.9+
 - **AI Framework**: LangChain (Agent + Tools)
-- **LLM**: OpenAI GPT-4 or Anthropic Claude
+- **LLM**: Google Gemini 2.5 Flash
 - **Database**: MongoDB Atlas (NoSQL)
 - **Infrastructure**: Google Cloud Functions (Webhook), Google Cloud Run
 - **Frontend**: Next.js + TypeScript + MUI (for dashboard)

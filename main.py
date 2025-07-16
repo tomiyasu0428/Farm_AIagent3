@@ -28,8 +28,8 @@ async def main():
         logger.info(f"デバッグモード: {settings.debug}")
         
         # 設定の検証
-        if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEYが設定されていません")
+        if not settings.google_api_key:
+            raise ValueError("GOOGLE_API_KEYが設定されていません")
         
         if not settings.mongodb_connection_string:
             raise ValueError("MONGODB_CONNECTION_STRINGが設定されていません")
