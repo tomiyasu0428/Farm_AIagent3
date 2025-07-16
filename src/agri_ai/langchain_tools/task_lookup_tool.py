@@ -27,8 +27,8 @@ class TaskLookupTool(AgriAIBaseTool):
             # クエリの解析
             search_params = self._parse_query(query)
             
-            # auto_tasksコレクションから検索
-            auto_tasks_collection = await self._get_collection("auto_tasks")
+            # scheduled_tasksコレクションから検索
+            scheduled_tasks_collection = await self._get_collection("scheduled_tasks")
             
             # 検索条件の構築
             filter_conditions = {"status": "pending"}
@@ -42,7 +42,7 @@ class TaskLookupTool(AgriAIBaseTool):
                 filter_conditions["field_id"] = search_params["field_filter"]
             
             # タスクの検索
-            tasks = await auto_tasks_collection.find(filter_conditions).to_list(100)
+            tasks = await scheduled_tasks_collection.find(filter_conditions).to_list(100)
             
             # 結果の整形
             formatted_tasks = []

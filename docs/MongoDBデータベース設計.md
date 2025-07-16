@@ -16,7 +16,7 @@ Airtable 運用中の「圃場管理・作付け計画・タスク管理」デ�
 | fields | 圃場マスター | `_id(ObjectId)` | crops (embedded) | 現在作付け・次回作業を保持 |
 | cultivation_plans | 作付け計画 | `_id` | fields.field_id | 1圃場×1年ドキュメント |
 | work_records | 作業履歴(完了) | `_id` | field_id, material_id | 時系列実績データ |
-| auto_tasks | 未来タスク(未実施) | `_id` | field_id | 日次バッチ/LINE 通知用 |
+| scheduled_tasks | 予定タスク(未実施) | `_id` | field_id | 日次バッチ/LINE 通知用 |
 | workers | 作業者マスター | `_id` | – | LINEアカウント紐付け |
 | sensor_logs | センサーデータ | `_id` | field_id | 圃場環境ログ |
 | weather_forecasts | 気象予報 | `_id` | – | 外部API取り込み |
@@ -125,7 +125,7 @@ Airtable 運用中の「圃場管理・作付け計画・タスク管理」デ�
 }
 ```
 
-### 3.6 auto_tasks（省略：work_records と同じ構造で `status: "pending"` を持つ）
+### 3.6 scheduled_tasks（省略：work_records と同じ構造で `status: "pending"` を持つ）
 
 ### 3.7 workers
 ```jsonc
@@ -225,6 +225,7 @@ Airtable 運用中の「圃場管理・作付け計画・タスク管理」デ�
 | fields | `field_code` (unique) | 圃場検索 |
 | fields | `next_scheduled_work.scheduled_date` | 直近タスク抽出 |
 | work_records | `field_id, work_date` (compound) | 圃場×日付の履歴検索 |
+| scheduled_tasks | `field_id, scheduled_date` (compound) | 圃場×予定日の検索 |
 | work_records | `work_type, work_date` | 作業種別統計 |
 | materials | `name` (text) | 資材検索 |
 | crops | `name`, `category` | 作物検索 |
@@ -269,17 +270,17 @@ Airtable 運用中の「圃場管理・作付け計画・タスク管理」デ�
    | fields | `field_code`, `name`, `area` | `soil_type`, `location` |
    | cultivation_plans | `year`, `field_id`, `crop_rotations` | `resource_allocation` |
    | work_records | `field_id`, `work_date`, `work_type` | `materials_used`, `next_work_scheduled` |
-   | auto_tasks | `field_id`, `scheduled_date`, `work_type` | `priority`, `notes` |
+   | scheduled_tasks | `field_id`, `scheduled_date`, `work_type` | `priority`, `notes` |
 
 3. **初期データ投入シーケンス**
    1. 最小限の **作物・資材マスター** を登録
    2. **fields** (圃場) を登録
    3. 各圃場に **cultivation_plans** を作成（`crop_rotations` は空でも可）
-   4. 以降、**work_records / auto_tasks** を随時追加
+   4. 以降、**work_records / scheduled_tasks** を随時追加
 
-4. **`auto_tasks` コレクションの取り扱い**
+4. **`scheduled_tasks` コレクションの取り扱い**
    - シンプル運用の場合は `work_records` に `status: "pending" | "completed"` を追加し 1 本化しても良い。
-   - 分割する場合は `auto_tasks` は未実施タスク専用コレクションとして扱う。
+   - 分割する場合は `scheduled_tasks` は未実施タスク専用コレクションとして扱う。
 
 5. **ユーザー／テナント識別**
    - マルチ農場運用を想定する場合、全コレクションに `owner_id` を追加し複合インデックス `(owner_id, …)` を設定。

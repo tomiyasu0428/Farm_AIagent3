@@ -4,7 +4,8 @@
 
 import os
 from typing import Optional
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -33,9 +34,7 @@ class Settings(BaseSettings):
     ai_response_timeout: int = Field(default=30, env="AI_RESPONSE_TIMEOUT")
     max_concurrent_requests: int = Field(default=100, env="MAX_CONCURRENT_REQUESTS")
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = {"env_file": ".env", "case_sensitive": False}
 
 
 # グローバル設定インスタンス

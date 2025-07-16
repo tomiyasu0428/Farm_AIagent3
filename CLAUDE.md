@@ -37,7 +37,7 @@ The system uses MongoDB with the following key collections:
 - `fields`: Field master data with current cultivation status
 - `cultivation_plans`: Annual crop rotation plans
 - `work_records`: Historical work completion records
-- `auto_tasks`: Future scheduled tasks
+- `scheduled_tasks`: Future scheduled tasks
 - `workers`: Worker master with LINE account linking
 - `sensor_logs`: Sensor data logging
 - `inventory`: Material inventory management

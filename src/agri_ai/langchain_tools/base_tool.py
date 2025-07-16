@@ -16,9 +16,13 @@ logger = logging.getLogger(__name__)
 class AgriAIBaseTool(BaseTool, ABC):
     """農業AI用基底ツールクラス"""
     
+    class Config:
+        arbitrary_types_allowed = True
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.mongodb_client = mongodb_client
+        # インスタンス変数として直接設定
+        object.__setattr__(self, 'mongodb_client', mongodb_client)
     
     async def _get_collection(self, collection_name: str):
         """指定されたコレクションを取得"""
