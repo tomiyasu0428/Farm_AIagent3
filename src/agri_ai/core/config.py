@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings
 
 class GoogleAISettings(BaseModel):
     """Google AI API設定"""
-    api_key: str = Field(..., env="GOOGLE_API_KEY")
+    api_key: str = Field(default="", env="GOOGLE_API_KEY")
     model_name: str = Field(default="gemini-2.5-flash", env="GOOGLE_AI_MODEL")
     temperature: float = Field(default=0.1, env="GOOGLE_AI_TEMPERATURE")
     timeout: int = Field(default=30, env="AI_RESPONSE_TIMEOUT")
@@ -18,7 +18,7 @@ class GoogleAISettings(BaseModel):
 
 class MongoDBSettings(BaseModel):
     """MongoDB設定"""
-    connection_string: str = Field(..., env="MONGODB_CONNECTION_STRING")
+    connection_string: str = Field(default="", env="MONGODB_CONNECTION_STRING")
     database_name: str = Field(default="agri_ai", env="MONGODB_DATABASE_NAME")
     max_pool_size: int = Field(default=50, env="MONGODB_MAX_POOL_SIZE")
     min_pool_size: int = Field(default=5, env="MONGODB_MIN_POOL_SIZE")
@@ -28,8 +28,8 @@ class MongoDBSettings(BaseModel):
 
 class LINEBotSettings(BaseModel):
     """LINE Bot設定"""
-    channel_access_token: str = Field(..., env="LINE_CHANNEL_ACCESS_TOKEN")
-    channel_secret: str = Field(..., env="LINE_CHANNEL_SECRET")
+    channel_access_token: str = Field(default="", env="LINE_CHANNEL_ACCESS_TOKEN")
+    channel_secret: str = Field(default="", env="LINE_CHANNEL_SECRET")
     webhook_url: Optional[str] = Field(None, env="LINE_WEBHOOK_URL")
 
 
@@ -50,18 +50,18 @@ class AppSettings(BaseModel):
 class Settings(BaseSettings):
     """統合設定クラス"""
     
-    # 各設定グループ
-    google_ai: GoogleAISettings = Field(default_factory=GoogleAISettings)
-    mongodb: MongoDBSettings = Field(default_factory=MongoDBSettings)
-    line_bot: LINEBotSettings = Field(default_factory=LINEBotSettings)
-    google_cloud: GoogleCloudSettings = Field(default_factory=GoogleCloudSettings)
-    app: AppSettings = Field(default_factory=AppSettings)
-    
     model_config = {"env_file": ".env", "case_sensitive": False}
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._validate_env_file()
+        
+        # 各設定グループを初期化
+        self.google_ai = GoogleAISettings()
+        self.mongodb = MongoDBSettings()
+        self.line_bot = LINEBotSettings()
+        self.google_cloud = GoogleCloudSettings()
+        self.app = AppSettings()
     
     def _validate_env_file(self):
         """環境設定ファイルの検証"""
