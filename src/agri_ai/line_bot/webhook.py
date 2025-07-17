@@ -2,9 +2,6 @@
 LINE Bot Webhook実装
 """
 
-import hashlib
-import hmac
-import base64
 from typing import Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from linebot import LineBotApi, WebhookHandler
@@ -53,45 +50,40 @@ async def health_check():
 @app.post("/webhook")
 async def webhook(request: Request):
     """LINE Webhookエンドポイント"""
+    # 署名の検証を WebhookHandler に任せる
+    signature = request.headers["X-Line-Signature"]
+    body = await request.body()
+
     try:
-        # リクエストボディの取得
-        body = await request.body()
-
-        # 署名の検証
-        signature = request.headers.get("X-Line-Signature", "")
-        if not _verify_signature(body, signature):
-            raise HTTPException(status_code=400, detail="Invalid signature")
-
-        # Webhookの処理
-        try:
-            handler.handle(body.decode("utf-8"), signature)
-        except InvalidSignatureError:
-            raise HTTPException(status_code=400, detail="Invalid signature")
-        except LineBotApiError as e:
-            logger.error(f"LINE Bot API エラー: {e}")
-            raise HTTPException(status_code=500, detail="LINE Bot API error")
-
-        return {"status": "ok"}
-
+        handler.handle(body.decode("utf-8"), signature)
+    except InvalidSignatureError:
+        logger.error("署名検証に失敗しました。")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    except LineBotApiError as e:
+        logger.error(f"LINE Bot API エラー: {e.status_code} {e.error.message}")
+        raise HTTPException(status_code=500, detail=f"LINE Bot API error: {e.error.message}")
     except Exception as e:
-        logger.error(f"Webhook処理エラー: {e}")
+        logger.error(f"Webhook処理中に予期せぬエラーが発生しました: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-
-def _verify_signature(body: bytes, signature: str) -> bool:
-    """署名の検証"""
-    try:
-        hash_value = hmac.new(settings.line_channel_secret.encode("utf-8"), body, hashlib.sha256).digest()
-
-        signature_hash = base64.b64encode(hash_value).decode("utf-8")
-        return hmac.compare_digest(signature, signature_hash)
-    except Exception as e:
-        logger.error(f"署名検証エラー: {e}")
-        return False
+    return {"status": "ok"}
 
 
-def _process_message_sync(message_text: str, user_id: str, reply_token: str):
-    """同期的にメッセージを処理する関数"""
+# 自前の署名検証関数は不要なため削除
+# def _verify_signature(body: bytes, signature: str) -> bool:
+#    """署名の検証"""
+#    try:
+#        hash_value = hmac.new(settings.line_channel_secret.encode("utf-8"), body, hashlib.sha256).digest()
+#
+#        signature_hash = base64.b64encode(hash_value).decode("utf-8")
+#        return hmac.compare_digest(signature, signature_hash)
+#    except Exception as e:
+#        logger.error(f"署名検証エラー: {e}")
+#        return False
+
+
+async def _process_message_async(message_text: str, user_id: str, reply_token: str):
+    """非同期でメッセージを処理する関数"""
     try:
         # エージェントが初期化されているか確認
         if not agri_agent.agent_executor:
@@ -100,8 +92,8 @@ def _process_message_sync(message_text: str, user_id: str, reply_token: str):
 
         logger.info(f"メッセージ処理開始 - ユーザー: {user_id}, 内容: {message_text}")
 
-        # エージェントでメッセージを処理
-        ai_response = agri_agent.process_message(message_text, user_id)
+        # エージェントでメッセージを非同期処理
+        ai_response = await agri_agent.process_message_async(message_text, user_id)
         logger.info(f"AI応答生成完了 - ユーザー: {user_id}")
 
         # 応答メッセージの送信
@@ -129,10 +121,21 @@ def handle_text_message(event):
 
         logger.info(f"受信メッセージ - ユーザー: {user_id}, 内容: {message_text}")
 
-        # 別スレッドで処理を実行（FastAPIのイベントループと競合しないように）
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(_process_message_sync, message_text, user_id, reply_token)
-            future.result(timeout=30)  # 30秒でタイムアウト
+        # 非同期処理をバックグラウンドタスクで実行
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            # バックグラウンドタスクとして非同期処理を実行
+            loop.create_task(_process_message_async(message_text, user_id, reply_token))
+        except RuntimeError:
+            # イベントループがない場合のフォールバック
+            logger.warning("イベントループが利用できません。ThreadPoolExecutorで処理します。")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    lambda: asyncio.run(_process_message_async(message_text, user_id, reply_token))
+                )
+                future.result(timeout=30)  # 30秒でタイムアウト
 
     except concurrent.futures.TimeoutError:
         logger.error("メッセージ処理がタイムアウトしました")

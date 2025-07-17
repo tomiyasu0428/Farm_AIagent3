@@ -1,11 +1,11 @@
 """
-タスク更新ツール (T2: TaskUpdateTool)
+作業タスク更新ツール（修正版）
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
-from bson import ObjectId
+from typing import Dict, Any, List
 import logging
+from bson import ObjectId
 
 from .base_tool import AgriAIBaseTool
 from ..utils.query_parser import query_parser
@@ -14,132 +14,127 @@ logger = logging.getLogger(__name__)
 
 
 class TaskUpdateTool(AgriAIBaseTool):
-    """タスクの更新・完了ツール"""
+    """作業タスクの更新・完了処理を行うツール"""
 
     name: str = "task_update"
-    description: str = (
-        "タスクの完了報告や更新を行います。"
-        "使用例: '防除作業終わりました', 'A畑の灌水完了', 'タスクを延期します'"
-    )
+    description: str = """作業タスクの更新・完了報告を処理します。以下の形式で使用してください:
+    - 作業完了: 「防除作業が完了しました」「第1ハウスの水やり終了」
+    - タスク延期: 「明日の防除を来週に延期」「トマトの収穫を3日後に変更」
+    """
+
+    async def _arun(self, query: str, **kwargs: Any) -> str:
+        """非同期でツールを実行"""
+        result = await self._execute(query)
+        return self._format_result(result)
 
     async def _execute(self, query: str) -> Dict[str, Any]:
-        """タスク更新の実行"""
+        """タスク更新処理の実行"""
         try:
-            # クエリの解析
+            # クエリを解析して意図を判定
             parsed_query = query_parser.parse_comprehensive_query(query)
-            action = self._determine_action(query)
-
-            if action == "complete":
-                return await self._complete_task(query, parsed_query)
-            elif action == "postpone":
-                return await self._postpone_task(query, parsed_query)
-            elif action == "update":
-                return await self._update_task(query, parsed_query)
+            
+            if self._is_completion_query(query):
+                return await self._handle_task_completion(query, parsed_query)
+            elif self._is_postpone_query(query):
+                return await self._handle_task_postpone(query, parsed_query)
             else:
-                return {"error": "実行するアクションが特定できませんでした"}
+                return {"error": "更新内容を特定できませんでした。"}
 
         except Exception as e:
             logger.error(f"タスク更新エラー: {e}")
-            return {"error": f"エラーが発生しました: {str(e)}"}
+            return {"error": f"処理中にエラーが発生しました: {str(e)}"}
 
-    def _determine_action(self, query: str) -> str:
-        """クエリからアクションを決定"""
-        complete_keywords = ["完了", "終わり", "終了", "できました", "やりました", "済み"]
-        postpone_keywords = ["延期", "後回し", "明日", "来週", "遅らせる"]
-
-        if any(keyword in query for keyword in complete_keywords):
-            return "complete"
-        elif any(keyword in query for keyword in postpone_keywords):
-            return "postpone"
-        else:
-            return "update"
-
-    async def _complete_task(self, query: str, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
-        """タスクの完了処理"""
-        try:
+    async def _handle_task_completion(self, query: str, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
+        """タスク完了処理"""
+        async def db_operation(client):
             # 該当するタスクを検索
-            tasks = await self._find_matching_tasks(parsed_query)
-
+            scheduled_tasks_collection = await client.get_collection("scheduled_tasks")
+            work_records_collection = await client.get_collection("work_records")
+            
+            # 検索条件を構築
+            filter_conditions = {"status": "pending"}
+            
+            # 作業種別の抽出
+            work_types = parsed_query.get("parsed_components", {}).get("work_types", [])
+            if work_types:
+                filter_conditions["work_type"] = {"$in": work_types}
+            
+            # 圃場の抽出
+            field_component = parsed_query.get("parsed_components", {}).get("field")
+            if field_component and field_component.get("field_filter"):
+                fields_collection = await client.get_collection("fields")
+                matching_fields = await fields_collection.find(
+                    {"name": {"$regex": field_component["field_filter"], "$options": "i"}}
+                ).to_list(100)
+                if matching_fields:
+                    field_ids = [field["_id"] for field in matching_fields]
+                    filter_conditions["field_id"] = {"$in": field_ids}
+            
+            tasks = await scheduled_tasks_collection.find(filter_conditions).to_list(100)
+            
             if not tasks:
-                return {"message": "該当するタスクが見つかりませんでした"}
-
-            # 複数タスクがある場合は最も適切なものを選択
+                return {"message": "完了対象のタスクが見つかりませんでした。"}
+            
+            # 最も適切なタスクを選択
             task_to_complete = self._select_best_match(tasks, parsed_query)
-
-            # タスクを完了状態に更新
-            scheduled_tasks_collection = await self._get_collection("scheduled_tasks")
-            work_records_collection = await self._get_collection("work_records")
-
+            if not task_to_complete:
+                return {"message": "完了対象のタスクを特定できませんでした。"}
+            
             # scheduled_tasksから削除
             await scheduled_tasks_collection.delete_one({"_id": task_to_complete["_id"]})
-
+            
             # work_recordsに完了記録を追加
             work_record = {
                 "field_id": task_to_complete["field_id"],
                 "work_date": datetime.now(),
                 "work_type": task_to_complete["work_type"],
-                "worker": "LINE Bot User",  # 実際のユーザー情報は将来実装
+                "worker": "LINE Bot User",
                 "materials_used": [],
                 "work_details": {
-                    "start_time": None,
-                    "end_time": None,
                     "notes": f"LINE経由で完了報告: {query}",
                 },
                 "created_at": datetime.now(),
                 "updated_at": datetime.now(),
             }
-
-            # 次回作業の自動スケジュール
-            next_work = await self._schedule_next_work(task_to_complete)
-            if next_work:
-                work_record["next_work_scheduled"] = next_work
-
-            result = await work_records_collection.insert_one(work_record)
-
-            # 圃場情報を取得
-            field_info = await self._get_field_info(task_to_complete["field_id"])
-
-            response = {
-                "action": "completed",
-                "task": {
-                    "圃場": field_info.get("name", "不明"),
-                    "作業内容": task_to_complete["work_type"],
-                    "完了日": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                },
-                "message": f"【{field_info.get('name', '不明')}】の{task_to_complete['work_type']}が完了しました",
+            await work_records_collection.insert_one(work_record)
+            
+            return {
+                "message": f"タスク「{task_to_complete['work_type']}」を完了として記録しました。",
+                "completed_task": task_to_complete,
+                "work_record": work_record
             }
 
-            if next_work:
-                response["next_work"] = {
-                    "作業内容": next_work["work_type"],
-                    "予定日": next_work["scheduled_date"].strftime("%Y-%m-%d"),
-                }
-                response[
-                    "message"
-                ] += f"\\n次回作業: {next_work['work_type']} ({next_work['scheduled_date'].strftime('%Y-%m-%d')})"
+        return await self._execute_with_db(db_operation)
 
-            return response
-
-        except Exception as e:
-            logger.error(f"タスク完了エラー: {e}")
-            return {"error": f"タスク完了処理でエラーが発生しました: {str(e)}"}
-
-    async def _postpone_task(self, query: str, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
-        """タスクの延期処理"""
-        try:
-            # 該当するタスクを検索
-            tasks = await self._find_matching_tasks(parsed_query)
-
+    async def _handle_task_postpone(self, query: str, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
+        """タスク延期処理"""
+        async def db_operation(client):
+            scheduled_tasks_collection = await client.get_collection("scheduled_tasks")
+            
+            # 延期対象のタスクを検索
+            filter_conditions = {"status": "pending"}
+            
+            # 延期日の抽出
+            date_component = parsed_query.get("parsed_components", {}).get("date")
+            postpone_date = None
+            if date_component:
+                postpone_date = date_component.get("date_range", {}).get("$gte")
+            
+            if not postpone_date:
+                return {"error": "延期日を特定できませんでした。"}
+            
+            # 作業種別の抽出
+            work_types = parsed_query.get("parsed_components", {}).get("work_types", [])
+            if work_types:
+                filter_conditions["work_type"] = {"$in": work_types}
+            
+            tasks = await scheduled_tasks_collection.find(filter_conditions).to_list(100)
+            
             if not tasks:
-                return {"message": "該当するタスクが見つかりませんでした"}
-
-            # 延期日を決定
-            postpone_date = self._determine_postpone_date(query)
-
+                return {"message": "延期対象のタスクが見つかりませんでした。"}
+            
             # タスクを更新
-            scheduled_tasks_collection = await self._get_collection("scheduled_tasks")
-
-            updated_tasks = []
+            updated_tasks_info = []
             for task in tasks:
                 await scheduled_tasks_collection.update_one(
                     {"_id": task["_id"]},
@@ -147,174 +142,70 @@ class TaskUpdateTool(AgriAIBaseTool):
                         "$set": {
                             "scheduled_date": postpone_date,
                             "updated_at": datetime.now(),
-                            "notes": f"延期: {query}",
+                            "postpone_reason": f"LINE経由で延期: {query}"
                         }
-                    },
-                )
-
-                field_info = await self._get_field_info(task["field_id"])
-                updated_tasks.append(
-                    {
-                        "圃場": field_info.get("name", "不明"),
-                        "作業内容": task["work_type"],
-                        "新しい予定日": postpone_date.strftime("%Y-%m-%d"),
                     }
                 )
-
+                
+                updated_tasks_info.append({
+                    "task_id": str(task["_id"]),
+                    "work_type": task["work_type"],
+                    "new_date": postpone_date.strftime("%Y-%m-%d"),
+                })
+            
             return {
-                "action": "postponed",
-                "tasks": updated_tasks,
-                "message": f"{len(updated_tasks)}件のタスクを{postpone_date.strftime('%Y-%m-%d')}に延期しました",
+                "message": f"{len(updated_tasks_info)}件のタスクを延期しました。",
+                "updated_tasks": updated_tasks_info
             }
 
-        except Exception as e:
-            logger.error(f"タスク延期エラー: {e}")
-            return {"error": f"タスク延期処理でエラーが発生しました: {str(e)}"}
+        return await self._execute_with_db(db_operation)
 
-    async def _update_task(self, query: str, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
-        """タスクの一般的な更新処理"""
-        return {"message": "タスクの更新機能は今後実装予定です"}
+    def _is_completion_query(self, query: str) -> bool:
+        """完了クエリかどうかを判定"""
+        completion_keywords = ["完了", "終了", "終わり", "済み", "できました", "やりました"]
+        return any(keyword in query for keyword in completion_keywords)
 
-    async def _find_matching_tasks(self, parsed_query: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """条件に一致するタスクを検索"""
-        try:
-            scheduled_tasks_collection = await self._get_collection("scheduled_tasks")
-
-            # 基本の検索条件
-            filter_conditions = {"status": "pending"}
-
-            # 日付条件
-            date_component = parsed_query.get("parsed_components", {}).get("date")
-            if date_component:
-                filter_conditions["scheduled_date"] = date_component["date_range"]
-            else:
-                # 日付指定がない場合は今日から1週間以内のタスクを対象
-                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                filter_conditions["scheduled_date"] = {"$gte": today, "$lte": today + timedelta(days=7)}
-
-            # 圃場条件
-            field_component = parsed_query.get("parsed_components", {}).get("field")
-            if field_component and field_component.get("field_filter"):
-                field_ids = await self._get_field_ids_by_name(field_component["field_filter"])
-                if field_ids:
-                    filter_conditions["field_id"] = {"$in": field_ids}
-
-            # 作業種別条件
-            work_types = parsed_query.get("parsed_components", {}).get("work_types")
-            if work_types:
-                filter_conditions["work_type"] = {"$in": work_types}
-
-            tasks = await scheduled_tasks_collection.find(filter_conditions).to_list(100)
-            return tasks
-
-        except Exception as e:
-            logger.error(f"タスク検索エラー: {e}")
-            return []
-
-    async def _get_field_ids_by_name(self, field_filter: Dict[str, Any]) -> List[Any]:
-        """圃場名から圃場IDを取得"""
-        try:
-            fields_collection = await self._get_collection("fields")
-            fields = await fields_collection.find(field_filter, {"_id": 1}).to_list(100)
-            return [field["_id"] for field in fields]
-        except Exception as e:
-            logger.error(f"圃場ID取得エラー: {e}")
-            return []
-
-    async def _get_field_info(self, field_id) -> Dict[str, Any]:
-        """圃場情報の取得"""
-        try:
-            fields_collection = await self._get_collection("fields")
-            field = await fields_collection.find_one({"_id": field_id})
-            return field or {"name": "不明な圃場"}
-        except Exception as e:
-            logger.error(f"圃場情報取得エラー: {e}")
-            return {"name": "不明な圃場"}
+    def _is_postpone_query(self, query: str) -> bool:
+        """延期クエリかどうかを判定"""
+        postpone_keywords = ["延期", "変更", "遅らせ", "後回し", "来週", "明日", "後で"]
+        return any(keyword in query for keyword in postpone_keywords)
 
     def _select_best_match(self, tasks: List[Dict[str, Any]], parsed_query: Dict[str, Any]) -> Dict[str, Any]:
         """最適なタスクを選択"""
         if len(tasks) == 1:
             return tasks[0]
-
-        # 優先度で選択
-        high_priority_tasks = [task for task in tasks if task.get("priority") == "high"]
-        if high_priority_tasks:
-            return high_priority_tasks[0]
-
-        # 最も近い予定日のタスクを選択
-        return min(tasks, key=lambda x: x["scheduled_date"])
-
-    def _determine_postpone_date(self, query: str) -> datetime:
-        """延期日を決定"""
-        if "明日" in query:
-            return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        elif "来週" in query:
-            return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=7)
-        elif "3日後" in query:
-            return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=3)
-        else:
-            # デフォルトは明日
-            return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-
-    async def _schedule_next_work(self, completed_task: Dict[str, Any]) -> Dict[str, Any]:
-        """次回作業の自動スケジュール"""
-        try:
-            # 防除作業の場合は7日後に次回防除をスケジュール
-            if completed_task["work_type"] == "防除":
-                next_date = datetime.now() + timedelta(days=7)
-
-                # 次回タスクを作成
-                scheduled_tasks_collection = await self._get_collection("scheduled_tasks")
-                next_task = {
-                    "field_id": completed_task["field_id"],
-                    "scheduled_date": next_date,
-                    "work_type": "防除",
-                    "priority": "medium",
-                    "status": "pending",
-                    "materials": [],
-                    "notes": "前回防除作業の自動スケジュール",
-                    "auto_generated": True,
-                    "created_at": datetime.now(),
-                    "updated_at": datetime.now(),
-                }
-
-                await scheduled_tasks_collection.insert_one(next_task)
-
-                return {"work_type": "防除", "scheduled_date": next_date, "auto_generated": True}
-
-            # 他の作業種別の場合は今後実装
-            return None
-
-        except Exception as e:
-            logger.error(f"次回作業スケジュールエラー: {e}")
-            return None
+        
+        # 日付が近いタスクを優先
+        today = datetime.now().date()
+        for task in tasks:
+            task_date = task.get("scheduled_date", datetime.now()).date()
+            if abs((task_date - today).days) <= 1:  # 今日または明日のタスク
+                return task
+        
+        # 優先度が高いタスクを選択
+        for priority in ["high", "medium", "low"]:
+            for task in tasks:
+                if task.get("priority") == priority:
+                    return task
+        
+        return tasks[0] if tasks else None
 
     def _format_result(self, result: Dict[str, Any]) -> str:
         """結果のフォーマット"""
         if result.get("error"):
-            return f"❌ {result['error']}"
-
-        if result.get("action") == "completed":
-            task = result.get("task", {})
-            message = f"✅ {result.get('message', 'タスクが完了しました')}"
-
-            if result.get("next_work"):
-                next_work = result["next_work"]
-                message += f"\\n\\n📋 次回予定: {next_work['作業内容']} ({next_work['予定日']})"
-
-            return message
-
-        elif result.get("action") == "postponed":
-            return f"📅 {result.get('message', 'タスクを延期しました')}"
-
-        else:
-            return result.get("message", "処理が完了しました")
-
-    async def _arun(self, query: str, run_manager: Any = None) -> str:
-        """非同期実行"""
-        try:
-            result = await self._execute(query)
-            return self._format_result(result)
-        except Exception as e:
-            logger.error(f"タスク更新エラー: {e}")
-            return f"タスク更新でエラーが発生しました: {str(e)}"
+            return f"❌ エラー: {result['error']}"
+        
+        message = result.get("message", "処理が完了しました。")
+        
+        if "completed_task" in result:
+            task = result["completed_task"]
+            return f"✅ {message}\n📋 完了タスク: {task['work_type']}"
+        
+        if "updated_tasks" in result:
+            tasks_info = "\n".join([
+                f"  • {task['work_type']} → {task['new_date']}"
+                for task in result["updated_tasks"]
+            ])
+            return f"📅 {message}\n{tasks_info}"
+        
+        return f"✅ {message}"

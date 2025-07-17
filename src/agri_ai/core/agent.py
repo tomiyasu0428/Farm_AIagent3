@@ -41,16 +41,24 @@ class AgriAIAgent:
             )
 
         # データベース接続
-        # MongoDB接続（非同期メソッドを同期関数内で実行）
+        # MongoDB接続は非同期処理で実行
         import asyncio
 
         if not mongodb_client.is_connected:
             try:
-                asyncio.run(mongodb_client.connect())
-            except RuntimeError:
-                # 既にイベントループが存在する場合は新しいタスクとして実行
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(mongodb_client.connect())
+                # 既存のイベントループを確認
+                try:
+                    loop = asyncio.get_running_loop()
+                    # 既にイベントループが実行中の場合はタスクとしてスケジュール
+                    task = loop.create_task(mongodb_client.connect())
+                    # メッセージ処理前に接続完了を待つ
+                    logger.info("MongoDB接続タスクをスケジュールしました")
+                except RuntimeError:
+                    # イベントループが実行されていない場合は同期実行
+                    asyncio.run(mongodb_client.connect())
+            except Exception as e:
+                logger.error(f"MongoDB接続エラー: {e}")
+                raise
 
         # ツールの初期化
         self._initialize_tools()
@@ -127,11 +135,19 @@ class AgriAIAgent:
 - 農薬の希釈倍率や使用制限は必ず確認してください
 """
 
-    def process_message(self, message: str, user_id: str) -> str:
-        """ユーザーからのメッセージを処理し、応答を生成する"""
+    async def process_message_async(self, message: str, user_id: str) -> str:
+        """非同期でユーザーからのメッセージを処理し、応答を生成する"""
         if not self.agent_executor:
             logger.error("エージェントが初期化されていません。")
             return "申し訳ございません。システムの準備ができていません。少し待ってから再度お試しください。"
+
+        # MongoDB接続確認
+        if not mongodb_client.is_connected:
+            try:
+                await mongodb_client.connect()
+            except Exception as e:
+                logger.error(f"MongoDB接続エラー: {e}")
+                return "データベース接続エラーが発生しました。しばらくしてから再度お試しください。"
 
         try:
             response = self.agent_executor.invoke({"input": message, "user_id": user_id})
@@ -143,6 +159,18 @@ class AgriAIAgent:
         except Exception as e:
             logger.error(f"メッセージ処理エラー: {e}")
             return "申し訳ございません。処理中にエラーが発生しました。しばらくしてから再度お試しください。"
+
+    def process_message(self, message: str, user_id: str) -> str:
+        """同期ラッパー関数（後方互換性のため）"""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            # 既にイベントループが実行中の場合は同期実行できない
+            logger.warning("イベントループ実行中のため、同期実行はできません")
+            return "システムが処理中です。しばらくお待ちください。"
+        except RuntimeError:
+            # イベントループが実行されていない場合は同期実行
+            return asyncio.run(self.process_message_async(message, user_id))
 
 
 # グローバルエージェントインスタンス

@@ -2,8 +2,7 @@
 作物-資材対応ツール (T5: CropMaterialTool)
 """
 
-from typing import Any, Dict, List
-from bson import ObjectId
+from typing import Any, Dict, Optional
 import logging
 
 from .base_tool import AgriAIBaseTool
@@ -23,7 +22,7 @@ class CropMaterialTool(AgriAIBaseTool):
         "作物に適用可能な資材や希釈倍率を検索します。"
         "使用例: 'トマトに使える農薬', 'ダコニールの希釈倍率', 'キュウリの防除薬剤'"
     )
-    
+
     data_access: Any = Field(default=None, exclude=True)
 
     def __init__(self, mongodb_client_instance=None):
@@ -33,8 +32,7 @@ class CropMaterialTool(AgriAIBaseTool):
     async def _execute(self, query: str) -> Dict[str, Any]:
         """作物-資材対応の実行"""
         try:
-            # クエリの解析
-            parsed_query = query_parser.parse_comprehensive_query(query)
+            # クエリの種類を判定
             query_type = self._determine_query_type(query)
 
             if query_type == "material_for_crop":
@@ -68,26 +66,37 @@ class CropMaterialTool(AgriAIBaseTool):
             if not crop_name:
                 return {"error": "作物名を特定できませんでした"}
 
-            # 作物情報を取得
-            crops_collection = await self._get_collection("crops")
-            crop = await crops_collection.find_one({"name": {"$regex": crop_name, "$options": "i"}})
+            # データベース操作を新しい接続で実行
+            async def db_operation(client):
+                crops_collection = await client.get_collection("crops")
+                crop = await crops_collection.find_one({"name": {"$regex": crop_name, "$options": "i"}})
+                
+                if not crop:
+                    return None, None
+                
+                materials_collection = await client.get_collection("materials")
+                applicable_materials = crop.get("applicable_materials", [])
+                
+                if not applicable_materials:
+                    # 作物に直接紐付いた資材がない場合、資材側から検索
+                    materials = await materials_collection.find(
+                        {f"dilution_rates.{crop_name}": {"$exists": True}}
+                    ).to_list(100)
+                    return crop, materials
+                else:
+                    # 適用可能な資材の詳細を取得
+                    materials = await materials_collection.find(
+                        {"name": {"$in": applicable_materials}}
+                    ).to_list(100)
+                    return crop, materials
 
+            crop, materials = await self._execute_with_db(db_operation)
+            
             if not crop:
                 return {"error": f"作物 '{crop_name}' が見つかりませんでした"}
 
-            # 適用可能な資材を取得
-            materials_collection = await self._get_collection("materials")
-            applicable_materials = crop.get("applicable_materials", [])
-
-            if not applicable_materials:
-                # 作物に直接紐付いた資材がない場合、資材側から検索
-                materials = await materials_collection.find(
-                    {f"dilution_rates.{crop_name}": {"$exists": True}}
-                ).to_list(100)
-            else:
-                # 作物に紐付いた資材IDから詳細情報を取得
-                material_ids = [material["material_id"] for material in applicable_materials]
-                materials = await materials_collection.find({"_id": {"$in": material_ids}}).to_list(100)
+            if not materials:
+                return {"error": f"作物 '{crop_name}' に適用可能な資材が見つかりませんでした"}
 
             # 結果を整形
             result_materials = []
@@ -123,11 +132,15 @@ class CropMaterialTool(AgriAIBaseTool):
             # 作物名を抽出
             crop_name = self._extract_crop_name(query)
 
-            # 資材情報を取得
-            materials_collection = await self._get_collection("materials")
-            material = await materials_collection.find_one(
-                {"name": {"$regex": material_name, "$options": "i"}}
-            )
+            # データベース操作を新しい接続で実行
+            async def db_operation(client):
+                materials_collection = await client.get_collection("materials")
+                material = await materials_collection.find_one(
+                    {"name": {"$regex": material_name, "$options": "i"}}
+                )
+                return material
+
+            material = await self._execute_with_db(db_operation)
 
             if not material:
                 return {"error": f"資材 '{material_name}' が見つかりませんでした"}
@@ -165,11 +178,15 @@ class CropMaterialTool(AgriAIBaseTool):
             if not material_name:
                 return {"error": "資材名を特定できませんでした"}
 
-            # 資材情報を取得
-            materials_collection = await self._get_collection("materials")
-            material = await materials_collection.find_one(
-                {"name": {"$regex": material_name, "$options": "i"}}
-            )
+            # データベース操作を新しい接続で実行
+            async def db_operation(client):
+                materials_collection = await client.get_collection("materials")
+                material = await materials_collection.find_one(
+                    {"name": {"$regex": material_name, "$options": "i"}}
+                )
+                return material
+
+            material = await self._execute_with_db(db_operation)
 
             if not material:
                 return {"error": f"資材 '{material_name}' が見つかりませんでした"}
@@ -214,10 +231,15 @@ class CropMaterialTool(AgriAIBaseTool):
     async def _get_specific_combination(self, crop_name: str, material_name: str) -> Dict[str, Any]:
         """特定の作物と資材の組み合わせを検索"""
         try:
-            materials_collection = await self._get_collection("materials")
-            material = await materials_collection.find_one(
-                {"name": {"$regex": material_name, "$options": "i"}}
-            )
+            # データベース操作を新しい接続で実行
+            async def db_operation(client):
+                materials_collection = await client.get_collection("materials")
+                material = await materials_collection.find_one(
+                    {"name": {"$regex": material_name, "$options": "i"}}
+                )
+                return material
+
+            material = await self._execute_with_db(db_operation)
 
             if not material:
                 return {"error": f"資材 '{material_name}' が見つかりませんでした"}
@@ -242,79 +264,50 @@ class CropMaterialTool(AgriAIBaseTool):
             logger.error(f"特定組み合わせ検索エラー: {e}")
             return {"error": f"検索中にエラーが発生しました: {str(e)}"}
 
-    def _extract_crop_name(self, query: str) -> str:
+    def _extract_crop_name(self, query: str) -> Optional[str]:
         """クエリから作物名を抽出"""
         return query_parser.extract_crop_name(query)
 
-    def _extract_material_name(self, query: str) -> str:
+    def _extract_material_name(self, query: str) -> Optional[str]:
         """クエリから資材名を抽出"""
-        return query_parser.extract_material_name(query)
+        # 新しい抽出メソッドを使用
+        return query_parser.extract_material_name_from_query(query)
 
     def _format_result(self, result: Dict[str, Any]) -> str:
-        """結果のフォーマット"""
-        if result.get("error"):
-            return f"❌ {result['error']}"
+        """ツール実行結果を整形"""
+        if not result or result.get("error"):
+            error_message = result.get("error", "不明なエラーが発生しました")
+            if "見つかりませんでした" in error_message:
+                return f"ごめんなさい、{error_message}。もう少し詳しく教えていただけますか？"
+            return f"❌ 検索中にエラーが発生しました: {error_message}"
 
-        # 作物用資材の場合
-        if result.get("materials"):
-            crop_name = result.get("crop_name", "不明")
-            materials = result.get("materials", [])
+        # クエリタイプに基づいて出力を整形
+        query_type = self._determine_query_type(result.get("original_query", ""))
 
-            if not materials:
-                return f"'{crop_name}' に適用可能な資材が見つかりませんでした"
-
-            lines = [f"🌱 {crop_name} に適用可能な資材 ({len(materials)}件):\n"]
-
-            for i, material in enumerate(materials, 1):
-                lines.append(f"{i}. {material['資材名']} ({material['種類']})")
-                lines.append(f"   希釈倍率: {material['希釈倍率']}")
-                lines.append(f"   収穫前日数: {material['収穫前日数']}日")
-
-                if material["対象病害"]:
-                    lines.append(f"   対象病害: {', '.join(material['対象病害'])}")
-                lines.append("")
-
-            return "\n".join(lines)
-
-        # 希釈倍率の場合
-        elif result.get("dilution_rate"):
-            material_name = result.get("material_name", "不明")
-            crop_name = result.get("crop_name")
-
-            if crop_name:
-                lines = [f"💧 {material_name} の希釈倍率:"]
-                lines.append(f"   作物: {crop_name}")
-                lines.append(f"   希釈倍率: {result['dilution_rate']}")
-                lines.append(f"   収穫前日数: {result.get('preharvest_interval', '不明')}日")
-                lines.append(f"   年間使用制限: {result.get('max_applications', '不明')}回")
+        if query_type == "dilution_rate":
+            material_name = result.get("material_name", "不明な資材")
+            if "crop_name" in result:
+                crop_name = result.get("crop_name", "不明な作物")
+                dilution_rate = result.get("dilution_rate", "不明")
+                return f"✅ {material_name}の{crop_name}に対する希釈倍率は{dilution_rate}です。"
             else:
-                lines = [f"💧 {material_name} の希釈倍率:"]
-                dilution_rates = result.get("dilution_rates", {})
-                for crop, rate in dilution_rates.items():
-                    lines.append(f"   {crop}: {rate}")
+                rates_str = ", ".join([f"{c}: {r}" for c, r in result.get("dilution_rates", {}).items()])
+                return f"✅ {material_name}の希釈倍率:\n{rates_str}"
 
+        if query_type == "material_for_crop":
+            crop_name = result.get("crop_name", "不明な作物")
+            materials = result.get("materials", [])
+            if not materials:
+                return f"✅ {crop_name}に適用可能な資材は見つかりませんでした。"
+
+            lines = [f"✅ {crop_name}に使用できる資材は以下の通りです："]
+            for mat in materials:
+                lines.append(f"  - {mat['資材名']} (希釈倍率: {mat['希釈倍率']})")
             return "\n".join(lines)
 
-        # 資材対象作物の場合
-        elif result.get("applicable_crops"):
-            material_name = result.get("material_name", "不明")
-            crops = result.get("applicable_crops", [])
+        return f"✅ 検索結果:\n{str(result)}"
 
-            lines = [f"🧪 {material_name} の適用可能作物:"]
-            for crop in crops:
-                rate = result.get("dilution_rates", {}).get(crop, "不明")
-                lines.append(f"   {crop}: {rate}")
-
-            return "\n".join(lines)
-
-        else:
-            return "検索結果が見つかりませんでした"
-
-    async def _arun(self, query: str, run_manager: Any = None) -> str:
-        """非同期実行"""
-        try:
-            result = await self._execute(query)
-            return self._format_result(result)
-        except Exception as e:
-            logger.error(f"作物資材検索エラー: {e}")
-            return f"作物資材検索でエラーが発生しました: {str(e)}"
+    async def _arun(self, query: str, **kwargs: Any) -> str:
+        """非同期でツールを実行"""
+        result = await self._execute(query)
+        return self._format_result(result)

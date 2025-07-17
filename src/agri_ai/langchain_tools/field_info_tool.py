@@ -26,18 +26,26 @@ class FieldInfoTool(AgriAIBaseTool):
             # クエリの解析
             field_filter = self._parse_field_query(query)
 
-            # fieldsコレクションから検索
-            fields_collection = await self._get_collection("fields")
+            # データベース操作を新しい接続で実行
+            async def db_operation(client):
+                fields_collection = await client.get_collection("fields")
 
-            if field_filter.get("all_fields"):
-                # 全圃場の情報を取得
-                fields = await fields_collection.find({}).to_list(100)
-                return await self._format_multiple_fields(fields)
+                if field_filter.get("all_fields"):
+                    # 全圃場の情報を取得
+                    fields = await fields_collection.find({}).to_list(100)
+                    return fields, True  # 複数フィールド
+                else:
+                    # 特定の圃場の情報を取得
+                    field = await fields_collection.find_one(field_filter)
+                    return field, False  # 単一フィールド
+
+            result, is_multiple = await self._execute_with_db(db_operation)
+            
+            if is_multiple:
+                return await self._format_multiple_fields(result)
             else:
-                # 特定の圃場の情報を取得
-                field = await fields_collection.find_one(field_filter)
-                if field:
-                    return await self._format_single_field(field)
+                if result:
+                    return await self._format_single_field(result)
                 else:
                     return {"error": "指定された圃場が見つかりません"}
 
@@ -127,8 +135,13 @@ class FieldInfoTool(AgriAIBaseTool):
             if not crop_id:
                 return {"name": "不明"}
 
-            crops_collection = await self._get_collection("crops")
-            crop = await crops_collection.find_one({"_id": ObjectId(crop_id)})
+            # データベース操作を新しい接続で実行
+            async def db_operation(client):
+                crops_collection = await client.get_collection("crops")
+                crop = await crops_collection.find_one({"_id": ObjectId(crop_id)})
+                return crop
+
+            crop = await self._execute_with_db(db_operation)
             return crop or {"name": "不明"}
         except Exception as e:
             logger.error(f"作物情報取得エラー: {e}")
@@ -172,11 +185,7 @@ class FieldInfoTool(AgriAIBaseTool):
 
         return "\n".join(formatted_lines)
 
-    async def _arun(self, query: str, run_manager: Any = None) -> str:
+    async def _arun(self, query: str, **kwargs: Any) -> str:
         """非同期実行"""
-        try:
-            result = await self._execute(query)
-            return self._format_result(result)
-        except Exception as e:
-            logger.error(f"圃場情報検索エラー: {e}")
-            return f"圃場情報検索でエラーが発生しました: {str(e)}"
+        result = await self._execute(query)
+        return self._format_result(result)

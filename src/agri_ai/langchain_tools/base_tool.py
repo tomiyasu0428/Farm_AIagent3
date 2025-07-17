@@ -1,11 +1,12 @@
 """
-LangChainツールの基底クラス
+農業AIのベースツール定義
 """
 
+import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, Optional
-from langchain.tools import BaseTool
+from typing import Any
 import logging
+from langchain_core.tools import BaseTool
 from pydantic import Field
 
 from ..database.mongodb_client import mongodb_client
@@ -14,99 +15,75 @@ logger = logging.getLogger(__name__)
 
 
 class AgriAIBaseTool(BaseTool, ABC):
-    """農業AI用基底ツールクラス"""
+    """農業AIエージェントのベースツールクラス"""
 
-    # mongodb_clientフィールドを明示的に宣言
     mongodb_client: Any = Field(default=None, exclude=True)
 
-    class Config:
-        arbitrary_types_allowed = True
-
     def __init__(self, mongodb_client_instance=None, **kwargs):
-        # mongodb_client を明示的に設定
-        if mongodb_client_instance is not None:
-            kwargs["mongodb_client"] = mongodb_client_instance
-        else:
-            kwargs.setdefault("mongodb_client", mongodb_client)
+        # LangChain v0.2.0以降の変更に対応
         super().__init__(**kwargs)
+        if mongodb_client_instance:
+            self.mongodb_client = mongodb_client_instance
+        else:
+            # グローバルインスタンスを使用
+            self.mongodb_client = mongodb_client
 
-    async def _get_collection(self, collection_name: str):
-        """指定されたコレクションを取得"""
-        return await self.mongodb_client.get_collection(collection_name)
-
-    def _run(self, query: str, run_manager: Optional[Any] = None) -> str:
-        """同期実行（非同期メソッドをラップ）"""
-        import asyncio
-
-        try:
-            # 現在のイベントループの状態を確認
+    def _run(self, query: str, **kwargs: Any) -> Any:
+        """同期的にツールを実行する"""
+        import concurrent.futures
+        import threading
+        
+        # 常に新しいスレッドで独立したイベントループを実行
+        result_container = {}
+        exception_container = {}
+        
+        def run_async():
             try:
-                asyncio.get_running_loop()
-                # 実行中のループがある場合は、ThreadPoolExecutorで新しいスレッドで実行
-                import concurrent.futures
-
-                def run_async():
-                    # 新しいイベントループを作成
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        return new_loop.run_until_complete(self._arun(query, run_manager))
-                    finally:
-                        new_loop.close()
-
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(run_async)
-                    return future.result()
-
-            except RuntimeError:
-                # イベントループが実行中でない場合は直接実行
-                return asyncio.run(self._arun(query, run_manager))
-
-        except Exception as e:
-            logger.error(f"同期実行エラー: {e}")
-            return f"ツール実行エラーが発生しました: {str(e)}"
-
-    async def _execute_sync(self, query: str) -> Any:
-        """非同期実行のラッパー"""
-        return await self._execute(query)
-
-    @abstractmethod
-    async def _arun(self, query: str, run_manager: Optional[Any] = None) -> str:
-        """非同期実行（サブクラスで実装）"""
-        raise NotImplementedError("サブクラスで実装してください")
+                # 新しいイベントループを作成
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result_container['result'] = new_loop.run_until_complete(self._arun(query, **kwargs))
+                finally:
+                    new_loop.close()
+            except Exception as e:
+                exception_container['exception'] = e
+            finally:
+                # スレッド終了時にイベントループをクリア
+                asyncio.set_event_loop(None)
+        
+        # 専用スレッドで実行
+        thread = threading.Thread(target=run_async)
+        thread.start()
+        thread.join(timeout=30)  # 30秒でタイムアウト
+        
+        if thread.is_alive():
+            logger.error("ツール実行がタイムアウトしました")
+            return "処理がタイムアウトしました"
+        
+        if 'exception' in exception_container:
+            logger.error(f"ツール実行エラー: {exception_container['exception']}")
+            raise exception_container['exception']
+        
+        return result_container.get('result', "処理中にエラーが発生しました")
 
     @abstractmethod
-    async def _execute(self, query: str) -> Any:
-        """ツール固有の実行ロジック"""
+    async def _arun(self, query: str, **kwargs: Any) -> Any:
+        """非同期にツールを実行する抽象メソッド"""
         pass
 
-    def _format_result(self, result: Any) -> str:
-        """結果をLINEメッセージ用にフォーマット"""
-        if isinstance(result, dict):
-            return self._format_dict_result(result)
-        elif isinstance(result, list):
-            return self._format_list_result(result)
-        else:
-            return str(result)
-
-    def _format_dict_result(self, result: dict) -> str:
-        """辞書形式の結果をフォーマット"""
-        formatted_lines = []
-        for key, value in result.items():
-            formatted_lines.append(f"{key}: {value}")
-        return "\n".join(formatted_lines)
-
-    def _format_list_result(self, result: list) -> str:
-        """リスト形式の結果をフォーマット"""
-        if not result:
-            return "結果がありません"
-
-        formatted_lines = []
-        for i, item in enumerate(result, 1):
-            if isinstance(item, dict):
-                item_str = self._format_dict_result(item)
-            else:
-                item_str = str(item)
-            formatted_lines.append(f"{i}. {item_str}")
-
-        return "\n".join(formatted_lines)
+    async def _execute_with_db(self, operation_func, *args, **kwargs):
+        """データベース操作を新しい接続で実行"""
+        from ..database.mongodb_client import create_mongodb_client
+        
+        fresh_client = create_mongodb_client()
+        try:
+            await fresh_client.connect()
+            result = await operation_func(fresh_client, *args, **kwargs)
+            return result
+        except Exception as e:
+            logger.error(f"データベース操作エラー: {e}")
+            raise
+        finally:
+            # 必ず接続を切断
+            await fresh_client.disconnect()
