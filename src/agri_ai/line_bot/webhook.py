@@ -11,7 +11,7 @@ import logging
 import concurrent.futures
 
 from ..core.config import settings
-from ..core.agent import agri_agent
+from ..core.master_agent import master_agent
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ async def health_check():
         return {
             "status": "healthy",
             "database": db_health,
-            "agent": "initialized" if agri_agent.agent_executor else "not_initialized",
+            "agent": "initialized" if master_agent.agent_executor else "not_initialized",
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
@@ -85,28 +85,37 @@ async def webhook(request: Request):
 async def _process_message_async(message_text: str, user_id: str, reply_token: str):
     """非同期でメッセージを処理する関数"""
     try:
-        # エージェントが初期化されているか確認
-        if not agri_agent.agent_executor:
-            logger.info("エージェントが初期化されていません。初回リクエストのため初期化します。")
-            agri_agent.initialize()
+        # MasterAgentが初期化されているか確認
+        if not master_agent.agent_executor:
+            logger.info("MasterAgentが初期化されていません。初回リクエストのため初期化します。")
+            master_agent.initialize()
 
         logger.info(f"メッセージ処理開始 - ユーザー: {user_id}, 内容: {message_text}")
 
-        # エージェントでメッセージを非同期処理
-        ai_response = await agri_agent.process_message_async(message_text, user_id)
-        logger.info(f"AI応答生成完了 - ユーザー: {user_id}")
-
-        # 応答メッセージの送信
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=ai_response))
+        # MasterAgentでメッセージを非同期処理（プラン共有機能付き）
+        result = await master_agent.process_message_async(message_text, user_id)
+        logger.info(f"MasterAgent応答生成完了 - ユーザー: {user_id}")
+        
+        # プランがある場合は先に送信
+        if result.get('plan') and not result.get('error'):
+            plan_message = f"🚀 処理開始\n\n{result['plan']}\n\n処理中..."
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=plan_message))
+            logger.info(f"プラン共有完了 - ユーザー: {user_id}")
+            
+            # メイン結果はプッシュメッセージで送信
+            line_bot_api.push_message(user_id, TextSendMessage(text=result['response']))
+        else:
+            # プランがない場合は直接応答
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=result['response']))
+            
         logger.info(f"応答送信完了 - ユーザー: {user_id}")
 
     except Exception as e:
-        logger.error(f"メッセージ処理エラー - ユーザー: {user_id}, エラー: {e}")
+        logger.error(f"MasterAgentメッセージ処理エラー - ユーザー: {user_id}, エラー: {e}")
         # エラー時の応答
         try:
-            line_bot_api.reply_message(
-                reply_token, TextSendMessage(text="申し訳ございません。処理中にエラーが発生しました。")
-            )
+            error_message = "😅 申し訳ございません。MasterAgent処理中にエラーが発生しました。\nしばらくしてから再度お試しください。"
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=error_message))
         except Exception as reply_error:
             logger.error(f"エラー応答送信失敗: {reply_error}")
 

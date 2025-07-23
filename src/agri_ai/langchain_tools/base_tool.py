@@ -75,6 +75,7 @@ class AgriAIBaseTool(BaseTool, ABC):
     async def _execute_with_db(self, operation_func, *args, **kwargs):
         """データベース操作を新しい接続で実行"""
         from ..database.mongodb_client import create_mongodb_client
+        import asyncio
         
         fresh_client = create_mongodb_client()
         try:
@@ -85,5 +86,17 @@ class AgriAIBaseTool(BaseTool, ABC):
             logger.error(f"データベース操作エラー: {e}")
             raise
         finally:
-            # 必ず接続を切断
-            await fresh_client.disconnect()
+            # 安全にDB接続を切断（イベントループが閉じられている場合の対策）
+            try:
+                # 現在のイベントループが有効かチェック
+                loop = asyncio.get_running_loop()
+                if not loop.is_closed():
+                    await fresh_client.disconnect()
+                else:
+                    logger.warning("イベントループが閉じられているため、DB切断をスキップ")
+            except RuntimeError:
+                # イベントループが存在しない場合
+                logger.warning("イベントループが見つからないため、DB切断をスキップ")
+            except Exception as disconnect_error:
+                logger.error(f"DB切断エラー: {disconnect_error}")
+                # 切断エラーは無視（メインの処理結果に影響させない）

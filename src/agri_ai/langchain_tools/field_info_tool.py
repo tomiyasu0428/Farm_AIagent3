@@ -55,32 +55,58 @@ class FieldInfoTool(AgriAIBaseTool):
 
     def _parse_field_query(self, query: str) -> Dict[str, Any]:
         """クエリから圃場の検索条件を解析"""
-        if "全圃場" in query or "すべて" in query:
+        if "全圃場" in query or "すべて" in query or "一覧" in query:
             return {"all_fields": True}
+        
+        # 豊緑エリア特別対応
+        if "豊緑" in query:
+            return {"location.region": "豊緑エリア"}
 
-        # 圃場コードやフィールド名での検索
+        # 圃場コードやフィールド名での検索パターンを拡張
         field_patterns = {
+            # 既存パターン
             "A畑": {"$regex": "A"},
             "B畑": {"$regex": "B"},
             "C畑": {"$regex": "C"},
             "第1": {"$regex": "第1"},
             "第2": {"$regex": "第2"},
             "ハウス": {"$regex": "ハウス"},
+            
+            # 豊緑エリア圃場パターン
+            "橋向こう": {"$regex": "橋向こう"},
+            "登山道前": {"$regex": "登山道前"},
+            "橋前": {"$regex": "橋前"},
+            "田んぼあと": {"$regex": "田んぼあと"},
+            "若菜横": {"$regex": "若菜横"},
+            "学校裏": {"$regex": "学校裏"},
+            "相田さん向かい": {"$regex": "相田さん向かい"},
+            "フォレスト": {"$regex": "フォレスト"},
         }
 
         for pattern, mongo_query in field_patterns.items():
             if pattern in query:
                 return {"$or": [{"field_code": mongo_query}, {"name": mongo_query}]}
 
-        return {}
+        # 特定の圃場名で完全一致検索
+        return {"name": {"$regex": query, "$options": "i"}}
 
     async def _format_single_field(self, field: Dict[str, Any]) -> Dict[str, Any]:
         """単一圃場の情報をフォーマット"""
+        # 面積をha単位で表示
+        area_m2 = field.get("area", 0)
+        area_ha = field.get("area_ha", area_m2 / 10000 if area_m2 > 0 else 0)
+        
+        # ha単位を優先的に表示
+        if area_ha >= 0.01:  # 0.01ha以上ならha表示
+            area_display = f"{area_ha:.1f}ha"
+        else:
+            area_display = f"{area_m2}㎡"
+        
         formatted_info = {
             "圃場情報": {
                 "圃場コード": field.get("field_code", "不明"),
                 "圃場名": field.get("name", "不明"),
-                "面積": f"{field.get('area', 0)}㎡",
+                "面積": area_display,
                 "土壌タイプ": field.get("soil_type", "不明"),
             }
         }
@@ -112,9 +138,21 @@ class FieldInfoTool(AgriAIBaseTool):
         formatted_info = {"圃場一覧": []}
 
         for field in fields:
+            # 面積をha単位で表示
+            area_m2 = field.get("area", 0)
+            area_ha = field.get("area_ha", area_m2 / 10000 if area_m2 > 0 else 0)
+            
+            # ha単位を優先的に表示
+            if area_ha >= 0.01:  # 0.01ha以上ならha表示
+                area_display = f"{area_ha:.1f}ha"
+            else:
+                area_display = f"{area_m2}㎡"
+            
             field_summary = {
+                "圃場コード": field.get("field_code", "不明"),
                 "圃場名": field.get("name", "不明"),
-                "面積": f"{field.get('area', 0)}㎡",
+                "面積": area_display,
+                "エリア": field.get("location", {}).get("region", "不明"),
                 "現在の作物": "未作付け",
             }
 
@@ -175,10 +213,13 @@ class FieldInfoTool(AgriAIBaseTool):
 
         # 複数圃場の場合
         elif "圃場一覧" in result:
-            formatted_lines.append("🌾 圃場一覧")
+            field_count = len(result["圃場一覧"])
+            formatted_lines.append(f"🌾 圃場一覧 (合計{field_count}件)")
+            
             for i, field in enumerate(result["圃場一覧"], 1):
-                formatted_lines.append(f"\n{i}. {field['圃場名']}")
+                formatted_lines.append(f"\n{i}. {field['圃場名']} ({field.get('圃場コード', '不明')})")
                 formatted_lines.append(f"   面積: {field['面積']}")
+                formatted_lines.append(f"   エリア: {field.get('エリア', '不明')}")
                 formatted_lines.append(f"   現在の作物: {field['現在の作物']}")
                 if "生育段階" in field:
                     formatted_lines.append(f"   生育段階: {field['生育段階']}")

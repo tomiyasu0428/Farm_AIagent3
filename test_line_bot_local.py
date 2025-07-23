@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 from src.agri_ai.line_bot.webhook import app
-from src.agri_ai.core.agent import agri_agent
+from src.agri_ai.core.master_agent import master_agent
 
 # 環境変数を読み込み
 load_dotenv()
@@ -18,9 +18,9 @@ async def test_line_bot_functionality():
     try:
         print("📱 LINE Bot機能のローカルテストを開始します...")
         
-        # エージェントの初期化
-        await agri_agent.initialize()
-        print("✅ エージェント初期化成功")
+        # MasterAgentの初期化
+        master_agent.initialize()
+        print("✅ MasterAgent初期化成功")
         
         # 模擬的なLINEメッセージイベントを作成
         test_messages = [
@@ -38,9 +38,16 @@ async def test_line_bot_functionality():
             print(f"📨 受信メッセージ: {message}")
             
             try:
-                # AIエージェントでメッセージを処理
-                response = await agri_agent.process_message(message, "test_user_line")
-                print(f"🤖 LINE Bot応答:")
+                # MasterAgentでメッセージを処理
+                result = await master_agent.process_message_async(message, "test_user_line")
+                response = result.get('response', 'エラーが発生しました')
+                
+                # プランがある場合は表示
+                if result.get('plan'):
+                    print(f"🚀 実行プラン:")
+                    print(result['plan'])
+                    print()
+                print(f"🤖 MasterAgent応答:")
                 print(response)
                 
                 # 応答の長さをチェック（LINEメッセージの制限対応）
@@ -71,7 +78,8 @@ async def test_line_bot_functionality():
         print(f"❌ エラーが発生しました: {e}")
         raise
     finally:
-        await agri_agent.shutdown()
+        # master_agent.shutdown()  # shutdownメソッドはないので削除
+        pass
 
 async def test_webhook_endpoints():
     """Webhookエンドポイントのテスト"""
