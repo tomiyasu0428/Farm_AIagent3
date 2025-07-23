@@ -96,6 +96,9 @@ async def test_webhook_endpoints():
     except Exception as e:
         print(f"❌ Webhookテストエラー: {e}")
 
+async def main():
+    await test_line_bot_functionality()
+    await test_webhook_endpoints()
+
 if __name__ == "__main__":
-    asyncio.run(test_line_bot_functionality())
-    asyncio.run(test_webhook_endpoints())
+    asyncio.run(main())

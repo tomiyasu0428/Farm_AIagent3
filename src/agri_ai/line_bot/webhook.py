@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="農業AI LINE Webhook", version="1.0.0")
 
 # LINE Bot APIの初期化
-line_bot_api = LineBotApi(settings.line_channel_access_token)
-handler = WebhookHandler(settings.line_channel_secret)
+line_bot_api = LineBotApi(settings.line_bot.channel_access_token)
+handler = WebhookHandler(settings.line_bot.channel_secret)
 
 
 @app.get("/")

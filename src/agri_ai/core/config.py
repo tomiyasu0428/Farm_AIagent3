@@ -119,42 +119,6 @@ class Settings(BaseSettings):
                 f"'.env.example' を '{env_file}' にコピーして適切な値を設定してください。"
             )
 
-    # 後方互換性のためのプロパティ
-    @property
-    def google_api_key(self) -> str:
-        return self.google_ai.api_key
-
-    @property
-    def mongodb_connection_string(self) -> str:
-        return self.mongodb.connection_string
-
-    @property
-    def mongodb_database_name(self) -> str:
-        return self.mongodb.database_name
-
-    @property
-    def line_channel_access_token(self) -> str:
-        return self.line_bot.channel_access_token
-
-    @property
-    def line_channel_secret(self) -> str:
-        return self.line_bot.channel_secret
-
-    @property
-    def environment(self) -> str:
-        return self.app.environment
-
-    @property
-    def debug(self) -> bool:
-        return self.app.debug
-
-    @property
-    def ai_response_timeout(self) -> int:
-        return self.google_ai.timeout
-
-    @property
-    def max_concurrent_requests(self) -> int:
-        return self.app.max_concurrent_requests
 
 
 # グローバル設定インスタンス

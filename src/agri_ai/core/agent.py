@@ -65,7 +65,7 @@ class AgriAIAgent:
 
         # LLMの初期化
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", temperature=0.1, google_api_key=settings.google_api_key
+            model="gemini-2.5-flash", temperature=0.1, google_api_key=settings.google_ai.api_key
         )
 
         # エージェントの作成

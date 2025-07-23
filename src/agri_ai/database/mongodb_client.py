@@ -17,7 +17,7 @@ class MongoDBClient:
     """MongoDB接続クライアント"""
     
     def __init__(self, connection_string: Optional[str] = None):
-        self.connection_string = connection_string or settings.mongodb_connection_string
+        self.connection_string = connection_string or settings.mongodb.connection_string
         self.client: Optional[AsyncIOMotorClient] = None
         self.database: Optional[AsyncIOMotorDatabase] = None
         
