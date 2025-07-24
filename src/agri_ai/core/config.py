@@ -4,65 +4,112 @@
 
 import os
 from typing import Optional
-from pydantic import Field, BaseModel
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
 
 
 class GoogleAISettings(BaseModel):
     """Google AI API設定"""
-    api_key: str = Field(..., env="GOOGLE_API_KEY")
-    model_name: str = Field(default="gemini-2.5-flash", env="GOOGLE_AI_MODEL")
-    temperature: float = Field(default=0.1, env="GOOGLE_AI_TEMPERATURE")
-    timeout: int = Field(default=30, env="AI_RESPONSE_TIMEOUT")
+
+    api_key: str = ""
+    model_name: str = "gemini-2.5-flash"
+    temperature: float = 0.1
+    timeout: int = 30
+
+
+class LangSmithSettings(BaseModel):
+    """LangSmith設定"""
+
+    api_key: str = ""
+    project_name: str = "agri-ai-project"
+    endpoint: str = "https://api.smith.langchain.com"
+    tracing_enabled: bool = False
 
 
 class MongoDBSettings(BaseModel):
     """MongoDB設定"""
-    connection_string: str = Field(..., env="MONGODB_CONNECTION_STRING")
-    database_name: str = Field(default="agri_ai", env="MONGODB_DATABASE_NAME")
-    max_pool_size: int = Field(default=50, env="MONGODB_MAX_POOL_SIZE")
-    min_pool_size: int = Field(default=5, env="MONGODB_MIN_POOL_SIZE")
-    connect_timeout: int = Field(default=10000, env="MONGODB_CONNECT_TIMEOUT")
-    server_selection_timeout: int = Field(default=5000, env="MONGODB_SERVER_SELECTION_TIMEOUT")
+
+    connection_string: str = ""
+    database_name: str = "agri_ai"
+    max_pool_size: int = 50
+    min_pool_size: int = 5
+    connect_timeout: int = 10000
+    server_selection_timeout: int = 5000
 
 
 class LINEBotSettings(BaseModel):
     """LINE Bot設定"""
-    channel_access_token: str = Field(..., env="LINE_CHANNEL_ACCESS_TOKEN")
-    channel_secret: str = Field(..., env="LINE_CHANNEL_SECRET")
-    webhook_url: Optional[str] = Field(None, env="LINE_WEBHOOK_URL")
+
+    channel_access_token: str = ""
+    channel_secret: str = ""
+    webhook_url: Optional[str] = None
 
 
 class GoogleCloudSettings(BaseModel):
     """Google Cloud設定"""
-    project_id: Optional[str] = Field(None, env="GOOGLE_CLOUD_PROJECT")
-    credentials_path: Optional[str] = Field(None, env="GOOGLE_APPLICATION_CREDENTIALS")
+
+    project_id: Optional[str] = None
+    credentials_path: Optional[str] = None
 
 
 class AppSettings(BaseModel):
     """アプリケーション設定"""
-    environment: str = Field(default="development", env="ENVIRONMENT")
-    debug: bool = Field(default=True, env="DEBUG")
-    max_concurrent_requests: int = Field(default=100, env="MAX_CONCURRENT_REQUESTS")
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
+
+    environment: str = "development"
+    debug: bool = True
+    max_concurrent_requests: int = 100
+    log_level: str = "INFO"
 
 
 class Settings(BaseSettings):
     """統合設定クラス"""
-    
-    # 各設定グループ
-    google_ai: GoogleAISettings = Field(default_factory=GoogleAISettings)
-    mongodb: MongoDBSettings = Field(default_factory=MongoDBSettings)
-    line_bot: LINEBotSettings = Field(default_factory=LINEBotSettings)
-    google_cloud: GoogleCloudSettings = Field(default_factory=GoogleCloudSettings)
-    app: AppSettings = Field(default_factory=AppSettings)
-    
-    model_config = {"env_file": ".env", "case_sensitive": False}
-    
+
+    model_config = {"env_file": ".env", "case_sensitive": False, "extra": "allow"}
+
     def __init__(self, **kwargs):
+        # 環境変数ファイルを読み込み
+        load_dotenv()
         super().__init__(**kwargs)
         self._validate_env_file()
-    
+
+        # 各設定グループを初期化（環境変数から読み込み）
+        self.google_ai = GoogleAISettings(
+            api_key=os.environ.get("GOOGLE_API_KEY", ""),
+            model_name=os.environ.get("GOOGLE_AI_MODEL", "gemini-2.5-flash"),
+            temperature=float(os.environ.get("GOOGLE_AI_TEMPERATURE", "0.1")),
+            timeout=int(os.environ.get("AI_RESPONSE_TIMEOUT", "30")),
+        )
+        self.langsmith = LangSmithSettings(
+            api_key=os.environ.get("LANGSMITH_API_KEY", ""),
+            project_name=os.environ.get("LANGSMITH_PROJECT", "agri-ai-project"),
+            endpoint=os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"),
+            tracing_enabled=os.environ.get("LANGSMITH_TRACING", "false").lower() == "true",
+        )
+        self.mongodb = MongoDBSettings(
+            connection_string=os.environ.get("MONGODB_CONNECTION_STRING", ""),
+            database_name=os.environ.get("MONGODB_DATABASE_NAME", "agri_ai"),
+            max_pool_size=int(os.environ.get("MONGODB_MAX_POOL_SIZE", "50")),
+            min_pool_size=int(os.environ.get("MONGODB_MIN_POOL_SIZE", "5")),
+            connect_timeout=int(os.environ.get("MONGODB_CONNECT_TIMEOUT", "10000")),
+            server_selection_timeout=int(os.environ.get("MONGODB_SERVER_SELECTION_TIMEOUT", "5000")),
+        )
+        self.line_bot = LINEBotSettings(
+            channel_access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""),
+            channel_secret=os.environ.get("LINE_CHANNEL_SECRET", ""),
+            webhook_url=os.environ.get("LINE_WEBHOOK_URL"),
+        )
+        self.google_cloud = GoogleCloudSettings(
+            project_id=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            credentials_path=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
+        )
+        self.app = AppSettings(
+            environment=os.environ.get("ENVIRONMENT", "development"),
+            debug=os.environ.get("DEBUG", "true").lower() == "true",
+            max_concurrent_requests=int(os.environ.get("MAX_CONCURRENT_REQUESTS", "100")),
+            log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        )
+
     def _validate_env_file(self):
         """環境設定ファイルの検証"""
         env_file = ".env"
@@ -71,44 +118,46 @@ class Settings(BaseSettings):
                 f"環境設定ファイル '{env_file}' が見つかりません。"
                 f"'.env.example' を '{env_file}' にコピーして適切な値を設定してください。"
             )
-    
-    # 後方互換性のためのプロパティ
-    @property
-    def google_api_key(self) -> str:
-        return self.google_ai.api_key
-    
-    @property
-    def mongodb_connection_string(self) -> str:
-        return self.mongodb.connection_string
-    
-    @property
-    def mongodb_database_name(self) -> str:
-        return self.mongodb.database_name
-    
-    @property
-    def line_channel_access_token(self) -> str:
-        return self.line_bot.channel_access_token
-    
-    @property
-    def line_channel_secret(self) -> str:
-        return self.line_bot.channel_secret
-    
-    @property
-    def environment(self) -> str:
-        return self.app.environment
-    
-    @property
-    def debug(self) -> bool:
-        return self.app.debug
-    
-    @property
-    def ai_response_timeout(self) -> int:
-        return self.google_ai.timeout
-    
-    @property
-    def max_concurrent_requests(self) -> int:
-        return self.app.max_concurrent_requests
+
 
 
 # グローバル設定インスタンス
 settings = Settings()
+
+
+def setup_logging():
+    """アプリケーション全体のロギング設定"""
+    import logging
+    import logging.config
+
+    log_level = settings.app.log_level.upper()
+
+    logging_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+            },
+        },
+        "root": {
+            "handlers": ["console"],
+            "level": log_level,
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["console"], "level": log_level, "propagate": False},
+            "fastapi": {"handlers": ["console"], "level": log_level, "propagate": False},
+            "linebot": {"handlers": ["console"], "level": log_level, "propagate": False},
+            "src": {"handlers": ["console"], "level": log_level, "propagate": True},
+        },
+    }
+
+    logging.config.dictConfig(logging_config)
+
+    logging.config.dictConfig(logging_config)

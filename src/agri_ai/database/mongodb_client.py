@@ -17,7 +17,7 @@ class MongoDBClient:
     """MongoDB接続クライアント"""
     
     def __init__(self, connection_string: Optional[str] = None):
-        self.connection_string = connection_string or settings.mongodb_connection_string
+        self.connection_string = connection_string or settings.mongodb.connection_string
         self.client: Optional[AsyncIOMotorClient] = None
         self.database: Optional[AsyncIOMotorDatabase] = None
         
@@ -32,7 +32,7 @@ class MongoDBClient:
         
     async def connect(self) -> None:
         """MongoDB接続の確立"""
-        if self.client:
+        if self.client is not None:
             logger.debug("MongoDB接続は既に確立されています")
             return
             
@@ -59,7 +59,7 @@ class MongoDBClient:
     
     async def disconnect(self) -> None:
         """MongoDB接続の切断"""
-        if self.client:
+        if self.client is not None:
             self.client.close()
             self.client = None
             self.database = None
@@ -67,14 +67,14 @@ class MongoDBClient:
     
     async def get_collection(self, collection_name: str):
         """指定されたコレクションを取得"""
-        if not self.database:
+        if self.database is None:
             raise RuntimeError("データベース接続が確立されていません")
         return self.database[collection_name]
     
     async def health_check(self) -> Dict[str, Any]:
         """データベースの健全性チェック"""
         try:
-            if not self.client:
+            if self.client is None:
                 return {"status": "error", "message": "接続未確立"}
             
             # ping test

@@ -1,12 +1,13 @@
 """
-LangChainツールの基底クラス
+農業AIのベースツール定義
 """
 
+import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
-from langchain.tools import BaseTool
-from pydantic import BaseModel
+from typing import Any
 import logging
+from langchain_core.tools import BaseTool
+from pydantic import Field
 
 from ..database.mongodb_client import mongodb_client
 
@@ -14,65 +15,88 @@ logger = logging.getLogger(__name__)
 
 
 class AgriAIBaseTool(BaseTool, ABC):
-    """農業AI用基底ツールクラス"""
-    
-    class Config:
-        arbitrary_types_allowed = True
-    
-    def __init__(self, **kwargs):
+    """農業AIエージェントのベースツールクラス"""
+
+    mongodb_client: Any = Field(default=None, exclude=True)
+
+    def __init__(self, mongodb_client_instance=None, **kwargs):
+        # LangChain v0.2.0以降の変更に対応
         super().__init__(**kwargs)
-        # インスタンス変数として直接設定
-        object.__setattr__(self, 'mongodb_client', mongodb_client)
-    
-    async def _get_collection(self, collection_name: str):
-        """指定されたコレクションを取得"""
-        return await self.mongodb_client.get_collection(collection_name)
-    
-    def _run(self, query: str, run_manager: Optional[Any] = None) -> str:
-        """同期実行（非推奨）"""
-        raise NotImplementedError("同期実行は非推奨です。_arunを使用してください。")
-    
-    async def _arun(self, query: str, run_manager: Optional[Any] = None) -> str:
-        """非同期実行"""
-        try:
-            result = await self._execute(query)
-            return self._format_result(result)
-        except Exception as e:
-            logger.error(f"ツール実行エラー ({self.name}): {e}")
-            return f"エラーが発生しました: {str(e)}"
-    
-    @abstractmethod
-    async def _execute(self, query: str) -> Any:
-        """ツール固有の実行ロジック"""
-        pass
-    
-    def _format_result(self, result: Any) -> str:
-        """結果をLINEメッセージ用にフォーマット"""
-        if isinstance(result, dict):
-            return self._format_dict_result(result)
-        elif isinstance(result, list):
-            return self._format_list_result(result)
+        if mongodb_client_instance:
+            self.mongodb_client = mongodb_client_instance
         else:
-            return str(result)
-    
-    def _format_dict_result(self, result: Dict[str, Any]) -> str:
-        """辞書形式の結果をフォーマット"""
-        formatted_lines = []
-        for key, value in result.items():
-            formatted_lines.append(f"{key}: {value}")
-        return "\n".join(formatted_lines)
-    
-    def _format_list_result(self, result: list) -> str:
-        """リスト形式の結果をフォーマット"""
-        if not result:
-            return "結果がありません"
+            # グローバルインスタンスを使用
+            self.mongodb_client = mongodb_client
+
+    def _run(self, query: str, **kwargs: Any) -> Any:
+        """同期的にツールを実行する"""
+        import concurrent.futures
+        import threading
         
-        formatted_lines = []
-        for i, item in enumerate(result, 1):
-            if isinstance(item, dict):
-                item_str = self._format_dict_result(item)
-            else:
-                item_str = str(item)
-            formatted_lines.append(f"{i}. {item_str}")
+        # 常に新しいスレッドで独立したイベントループを実行
+        result_container = {}
+        exception_container = {}
         
-        return "\n".join(formatted_lines)
+        def run_async():
+            try:
+                # 新しいイベントループを作成
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result_container['result'] = new_loop.run_until_complete(self._arun(query, **kwargs))
+                finally:
+                    new_loop.close()
+            except Exception as e:
+                exception_container['exception'] = e
+            finally:
+                # スレッド終了時にイベントループをクリア
+                asyncio.set_event_loop(None)
+        
+        # 専用スレッドで実行
+        thread = threading.Thread(target=run_async)
+        thread.start()
+        thread.join(timeout=30)  # 30秒でタイムアウト
+        
+        if thread.is_alive():
+            logger.error("ツール実行がタイムアウトしました")
+            return "処理がタイムアウトしました"
+        
+        if 'exception' in exception_container:
+            logger.error(f"ツール実行エラー: {exception_container['exception']}")
+            raise exception_container['exception']
+        
+        return result_container.get('result', "処理中にエラーが発生しました")
+
+    @abstractmethod
+    async def _arun(self, query: str, **kwargs: Any) -> Any:
+        """非同期にツールを実行する抽象メソッド"""
+        pass
+
+    async def _execute_with_db(self, operation_func, *args, **kwargs):
+        """データベース操作を新しい接続で実行"""
+        from ..database.mongodb_client import create_mongodb_client
+        import asyncio
+        
+        fresh_client = create_mongodb_client()
+        try:
+            await fresh_client.connect()
+            result = await operation_func(fresh_client, *args, **kwargs)
+            return result
+        except Exception as e:
+            logger.error(f"データベース操作エラー: {e}")
+            raise
+        finally:
+            # 安全にDB接続を切断（イベントループが閉じられている場合の対策）
+            try:
+                # 現在のイベントループが有効かチェック
+                loop = asyncio.get_running_loop()
+                if not loop.is_closed():
+                    await fresh_client.disconnect()
+                else:
+                    logger.warning("イベントループが閉じられているため、DB切断をスキップ")
+            except RuntimeError:
+                # イベントループが存在しない場合
+                logger.warning("イベントループが見つからないため、DB切断をスキップ")
+            except Exception as disconnect_error:
+                logger.error(f"DB切断エラー: {disconnect_error}")
+                # 切断エラーは無視（メインの処理結果に影響させない）
