@@ -5,11 +5,12 @@ WorkLogRegistrationAgentを呼び出すためのカスタムツール
 """
 
 import logging
-from typing import Any, Dict, Type
+from typing import Dict, Type
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
 
 from ..agents.work_log_registration_agent import WorkLogRegistrationAgent
+from ..protocols.agents import WorkLogRegistrationAgentProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -27,18 +28,18 @@ class WorkLogRegistrationAgentTool(BaseTool):
     作業の完了報告、日々の作業ログの保存などに使用してください。
     """
     args_schema: Type[BaseModel] = WorkLogRegistrationToolInput
-    agent: WorkLogRegistrationAgent
+    agent: WorkLogRegistrationAgentProtocol
 
-    def __init__(self, agent: WorkLogRegistrationAgent):
+    def __init__(self, agent: WorkLogRegistrationAgentProtocol):
         super().__init__()
         self.agent = agent
 
-    def _run(self, message: str, user_id: str) -> Dict[str, Any]:
+    def _run(self, message: str, user_id: str) -> Dict[str, str]:
         """同期的にツールを実行する（非推奨）"""
         import asyncio
         return asyncio.run(self._arun(message=message, user_id=user_id))
 
-    async def _arun(self, message: str, user_id: str) -> Dict[str, Any]:
+    async def _arun(self, message: str, user_id: str) -> Dict[str, str]:
         """非同期的にツールを実行する"""
         logger.info(f"Executing WorkLogRegistrationAgentTool for user {user_id}")
         try:

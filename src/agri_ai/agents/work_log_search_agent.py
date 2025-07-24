@@ -7,7 +7,7 @@ WorkLogSearchAgent: 作業記録検索専門エージェント
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 from ..core.base_agent import BaseAgent
 from ..services.master_data_resolver import MasterDataResolver
 from ..database.mongodb_client import create_mongodb_client
@@ -35,7 +35,7 @@ class WorkLogSearchAgent(BaseAgent):
             timeout=30
         )
     
-    def _setup_tools(self) -> List[Any]:
+    def _setup_tools(self) -> List:
         """ツールの設定 - 作業記録検索専用"""
         from ..langchain_tools.work_log_search_tool import WorkLogSearchTool
         

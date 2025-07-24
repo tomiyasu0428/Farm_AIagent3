@@ -8,10 +8,9 @@ MasterDataResolverと連携してIDベースのデータ正規化を実現する
 import uuid
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
-from ..core.base_agent import BaseAgent
+from typing import Dict, List
 from ..services.master_data_resolver import MasterDataResolver
-from ..database.mongodb_client import create_mongodb_client
+from ..dependencies.database import DatabaseConnection
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +18,13 @@ logger = logging.getLogger(__name__)
 class WorkLogRegistrationAgent:
     """作業記録登録専門エージェント"""
     
-    def __init__(self):
-        self.master_resolver = MasterDataResolver()
+    def __init__(self, db_connection: DatabaseConnection = None):
+        self.db_connection = db_connection or DatabaseConnection()
+        self.master_resolver = MasterDataResolver(self.db_connection)
     
     
 
-    async def register_work_log(self, message: str, user_id: str) -> Dict[str, any]:
+    async def register_work_log(self, message: str, user_id: str) -> Dict[str, str]:
         """
         作業記録を登録するメイン処理
         
@@ -64,7 +64,7 @@ class WorkLogRegistrationAgent:
                 'message': '作業記録の登録中にエラーが発生しました。'
             }
     
-    async def _extract_work_info(self, message: str) -> Dict[str, any]:
+    async def _extract_work_info(self, message: str) -> Dict[str, str]:
         """自然言語から基本情報を抽出"""
         import re
         
@@ -146,7 +146,7 @@ class WorkLogRegistrationAgent:
         
         return extracted
     
-    async def _resolve_master_data(self, extracted_info: Dict) -> Dict[str, any]:
+    async def _resolve_master_data(self, extracted_info: Dict[str, str]) -> Dict[str, str]:
         """マスターデータとの照合・ID変換"""
         resolved = {
             'field_data': None,
@@ -260,20 +260,19 @@ class WorkLogRegistrationAgent:
         }
         
         # データベース保存
-        client = create_mongodb_client()
+        client = await self.db_connection.get_client()
         try:
-            await client.connect()
             work_logs_collection = await client.get_collection('work_logs')
             
-            result = await work_logs_collection.insert_one(log_record)
+            await work_logs_collection.insert_one(log_record)
             logger.info(f"作業記録保存完了: {log_id}")
             
             return log_record
             
         finally:
-            await client.disconnect()
+            pass  # 接続は再利用されるためdisconnectしない
     
-    def _format_registration_result(self, log_record: Dict, resolved_data: Dict) -> Dict[str, any]:
+    def _format_registration_result(self, log_record: Dict, resolved_data: Dict) -> Dict[str, str]:
         """登録結果の整形"""
         
         # 信頼度の計算

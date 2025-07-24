@@ -6,9 +6,9 @@ MasterDataResolver: マスターデータとの連携・ID変換サービス
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 from difflib import SequenceMatcher
-from ..database.mongodb_client import create_mongodb_client
+from ..dependencies.database import DatabaseConnection
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +16,18 @@ logger = logging.getLogger(__name__)
 class MasterDataResolver:
     """マスターデータとの照合・ID変換サービス"""
     
-    def __init__(self):
+    def __init__(self, db_connection: DatabaseConnection = None):
         # キャッシュ管理
         self.fields_cache = None
         self.crops_cache = None  
         self.materials_cache = None
         self.cache_timeout = 300  # 5分キャッシュ
-        self.last_cache_time = 0
+        self.fields_cache_time = 0
+        self.crops_cache_time = 0
+        self.materials_cache_time = 0
+        self.db_connection = db_connection or DatabaseConnection()
     
-    async def resolve_field_data(self, field_text: str) -> Dict[str, any]:
+    async def resolve_field_data(self, field_text: str) -> Dict[str, str]:
         """
         圃場名をマスターデータと照合してIDに変換
         
@@ -145,13 +148,12 @@ class MasterDataResolver:
         
         # キャッシュチェック
         if (self.fields_cache is not None and 
-            current_time - self.last_cache_time < self.cache_timeout):
+            current_time - self.fields_cache_time < self.cache_timeout):
             return self.fields_cache
         
         # データベースから取得
-        client = create_mongodb_client()
+        client = await self.db_connection.get_client()
         try:
-            await client.connect()
             fields_collection = await client.get_collection("fields")
             
             fields = await fields_collection.find(
@@ -161,13 +163,13 @@ class MasterDataResolver:
             
             # キャッシュ更新
             self.fields_cache = fields
-            self.last_cache_time = current_time
+            self.fields_cache_time = current_time
             
             logger.info(f"圃場マスターデータ取得: {len(fields)}件")
             return fields
             
         finally:
-            await client.disconnect()
+            pass  # 接続は再利用されるため、ここではdisconnectしない
     
     async def _get_crops_data(self) -> List[Dict]:
         """作物マスターデータを取得（キャッシュ付き）"""
@@ -176,13 +178,12 @@ class MasterDataResolver:
         
         # キャッシュチェック
         if (self.crops_cache is not None and 
-            current_time - self.last_cache_time < self.cache_timeout):
+            current_time - self.crops_cache_time < self.cache_timeout):
             return self.crops_cache
         
         # データベースから取得
-        client = create_mongodb_client()
+        client = await self.db_connection.get_client()
         try:
-            await client.connect()
             crops_collection = await client.get_collection("crops")
             
             crops = await crops_collection.find(
@@ -192,13 +193,13 @@ class MasterDataResolver:
             
             # キャッシュ更新
             self.crops_cache = crops
-            self.last_cache_time = current_time
+            self.crops_cache_time = current_time
             
             logger.info(f"作物マスターデータ取得: {len(crops)}件")
             return crops
             
         finally:
-            await client.disconnect()
+            pass  # 接続は再利用されるため、ここではdisconnectしない
     
     async def _get_materials_data(self) -> List[Dict]:
         """資材マスターデータを取得（キャッシュ付き）"""
@@ -207,13 +208,12 @@ class MasterDataResolver:
         
         # キャッシュチェック
         if (self.materials_cache is not None and 
-            current_time - self.last_cache_time < self.cache_timeout):
+            current_time - self.materials_cache_time < self.cache_timeout):
             return self.materials_cache
         
         # データベースから取得
-        client = create_mongodb_client()
+        client = await self.db_connection.get_client()
         try:
-            await client.connect()
             materials_collection = await client.get_collection("materials")
             
             materials = await materials_collection.find(
@@ -223,13 +223,13 @@ class MasterDataResolver:
             
             # キャッシュ更新  
             self.materials_cache = materials
-            self.last_cache_time = current_time
+            self.materials_cache_time = current_time
             
             logger.info(f"資材マスターデータ取得: {len(materials)}件")
             return materials
             
         finally:
-            await client.disconnect()
+            pass  # 接続は再利用されるため、ここではdisconnectしない
     
     def _multi_stage_field_matching(self, field_text: str, fields_data: List[Dict]) -> Dict[str, any]:
         """圃場の段階的照合"""
