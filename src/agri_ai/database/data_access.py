@@ -77,3 +77,60 @@ class DataAccessLayer:
         except Exception as e:
             logger.error(f"資材情報取得エラー: {e}")
             return {}
+
+    async def search_work_logs(self, query_params: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
+        """作業記録を検索する共通メソッド"""
+        try:
+            work_logs_collection = await self._get_collection("work_logs")
+            
+            # 検索クエリの構築
+            query = {'user_id': user_id}
+            
+            # 日付範囲フィルタ
+            if query_params.get('date_range'):
+                date_range = query_params['date_range']
+                query['work_date'] = {
+                    '$gte': date_range['start'],
+                    '$lte': date_range['end']
+                }
+            
+            # 圃場フィルタ
+            if query_params.get('field_names'):
+                field_conditions = []
+                for field_name in query_params['field_names']:
+                    field_conditions.extend([
+                        {'extracted_data.field_name': {'$regex': field_name, '$options': 'i'}},
+                        {'original_message': {'$regex': field_name, '$options': 'i'}}
+                    ])
+                if field_conditions:
+                    # 既存の $or 条件と結合
+                    if '$or' in query:
+                        query['$and'] = [{'$or': query['$or']}, {'$or': field_conditions}]
+                        del query['$or']
+                    else:
+                        query['$or'] = field_conditions
+            
+            # 作業種別フィルタ
+            if query_params.get('work_categories'):
+                query['category'] = {'$in': query_params['work_categories']}
+            
+            # 検索実行
+            cursor = work_logs_collection.find(query)
+            
+            # ソート
+            if query_params.get('sort_order') == 'desc':
+                cursor = cursor.sort('work_date', -1)
+            else:
+                cursor = cursor.sort('work_date', 1)
+            
+            # 件数制限
+            cursor = cursor.limit(query_params.get('limit', 50))
+            
+            results = await cursor.to_list(None)
+            logger.info(f"DataAccessLayer: 作業記録検索結果: {len(results)}件")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"DataAccessLayer: 作業記録検索エラー: {e}")
+            return []

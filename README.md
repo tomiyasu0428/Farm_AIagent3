@@ -8,11 +8,13 @@ LINE Bot を通じて農業作業を支援するAIエージェントシステム
 
 ## 主な機能
 
-- **タスク管理**: 今日のタスクや作業予定の確認
-- **圃場情報**: 圃場の現在の状況や作付け情報の取得
-- **農薬指導**: 適切な農薬の選定と希釈倍率の提案
-- **作業記録**: 作業完了の報告と自動スケジューリング
-- **在庫管理**: 資材の在庫状況確認
+- **圃場情報管理**: 圃場の登録、更新、および圃場に関する情報の取得
+- **作業記録登録**: LINEを通じて日々の農作業内容を自然言語で記録・管理
+- **AIエージェントによる対話**: ユーザーの質問や指示に基づき、適切な情報提供やタスク実行を支援
+
+## 作業記録の登録方法
+
+作業記録の登録方法については、[こちら](docs/作業記録の管理方法.md) を参照してください。
 
 ## 技術スタック
 
@@ -79,24 +81,30 @@ curl http://localhost:8000/health
 
 ```
 src/agri_ai/
+├── agents/                  # 各種専門エージェント
+│   ├── field_agent.py
+│   ├── work_log_registration_agent.py
+│   └── work_log_search_agent.py
 ├── core/                    # コア機能
-│   ├── __init__.py
 │   ├── config.py           # 設定管理
-│   └── agent.py            # LangChain エージェント
+│   ├── master_agent.py     # 司令塔エージェント
+│   └── error_handler.py    # エラーハンドリング
 ├── database/               # データベース関連
-│   ├── __init__.py
-│   ├── mongodb_client.py   # MongoDB 接続
-│   └── models.py           # データモデル
+│   ├── data_access.py      # データアクセス層
+│   ├── models.py           # データモデル
+│   └── mongodb_client.py   # MongoDB クライアント
 ├── langchain_tools/        # LangChain ツール
-│   ├── __init__.py
 │   ├── base_tool.py        # 基底ツール
-│   ├── task_lookup_tool.py # タスク検索
-│   └── field_info_tool.py  # 圃場情報取得
+│   ├── field_agent_tool.py
+│   └── work_log_registration_agent_tool.py
 ├── line_bot/               # LINE Bot関連
-│   ├── __init__.py
 │   └── webhook.py          # Webhook処理
+├── services/               # サービス層
+│   ├── field_name_extractor.py
+│   ├── master_data_resolver.py
+│   └── query_analyzer.py
 └── utils/                  # ユーティリティ
-    └── __init__.py
+    └── query_parser.py
 ```
 
 ## 開発フェーズ
@@ -107,16 +115,19 @@ src/agri_ai/
 - [x] LangChain エージェント基盤
 - [x] LINE Webhook実装
 
-### Phase 1 - 基本機能
-- [ ] タスク管理機能の完成
-- [ ] 圃場情報取得機能の完成
-- [ ] 農薬提案機能の実装
-- [ ] 作業記録機能の実装
+### Phase 1 - マルチエージェント・アーキテクチャと作業記録機能 ✅
+- [x] マルチエージェント・アーキテクチャへのリファクタリング
+- [x] 作業記録登録機能の基盤構築
 
-### Phase 2 - 管理機能
+### Phase 2 - 作業記録検索と会話履歴
+- [ ] 作業記録検索機能の実装
+- [ ] ユーザーとの会話履歴を記憶する機能の追加
+
+### Phase 3 - 管理機能とテスト
 - [ ] Web ダッシュボードの実装
 - [ ] マスターデータ管理
 - [ ] ユーザー管理機能
+- [ ] 各機能の単体テストおよび結合テストの実施
 
 ## テスト
 
