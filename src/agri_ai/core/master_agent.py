@@ -15,12 +15,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import logging
 
 from .config import settings
-from ..langchain_tools.task_lookup_tool import TaskLookupTool
-from ..langchain_tools.task_update_tool import TaskUpdateTool
-from ..langchain_tools.field_info_tool import FieldInfoTool
-from ..langchain_tools.crop_material_tool import CropMaterialTool
-from ..langchain_tools.work_suggestion_tool import WorkSuggestionTool
 from ..database.mongodb_client import mongodb_client
+from ..services.query_analyzer import QueryAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +38,7 @@ class MasterAgent:
         self.tools = []
         self.field_agent = None  # 圃場専門エージェント
         self.execution_plan = None  # 実行プラン
+        self.query_analyzer = QueryAnalyzer()  # クエリ分析サービス
 
     def initialize(self):
         """エージェントの初期化"""
@@ -105,11 +102,6 @@ class MasterAgent:
         from ..langchain_tools.field_registration_agent_tool import FieldRegistrationAgentTool
         
         self.tools = [
-            TaskLookupTool(),
-            TaskUpdateTool(),
-            FieldInfoTool(),  # 既存ツール維持（互換性のため）
-            CropMaterialTool(),
-            WorkSuggestionTool(),
             FieldAgentTool(self.field_agent),  # 圃場情報専門エージェント
             FieldRegistrationAgentTool(self.field_registration_agent),  # 圃場登録専門エージェント
         ]
@@ -137,13 +129,8 @@ class MasterAgent:
 農業従事者からのLINEでの問い合わせに対して、適切な農業作業の指示や情報を提供します。
 
 利用可能なツール：
-1. task_lookup: 今日のタスクや作業予定を検索
-2. task_update: 作業の完了報告や延期処理
-3. field_info: 圃場の詳細情報や作付け状況を取得
-4. crop_material: 作物と資材の対応関係、希釈倍率を検索
-5. work_suggestion: 作業提案、農薬ローテーション、天候を考慮した作業計画
-6. field_agent_tool: 圃場情報専門エージェント（情報取得・検索）
-7. field_registration_agent_tool: 圃場登録専門エージェント（新規登録・追加）
+1. field_agent_tool: 圃場情報専門エージェント（情報取得・検索）
+2. field_registration_agent_tool: 圃場登録専門エージェント（新規登録・追加）
 
 専門エージェント連携：
 - FieldAgent: 圃場情報の専門家
@@ -156,13 +143,7 @@ class MasterAgent:
   - 圃場データの検証
 
 主な責務：
-1. 作業タスクの確認と管理
-2. 圃場情報の提供と登録管理
-3. 農薬・肥料の使用指導（希釈倍率、使用制限）
-4. 作業記録の管理
-5. 作付け計画の支援
-6. 作業提案と農薬ローテーション管理
-7. 天候を考慮した作業計画
+司令塔として適切な専門エージェントに作業を振り分けること
 
 対応方針：
 - 常に安全で正確な農業指導を心がけてください
@@ -210,10 +191,13 @@ class MasterAgent:
                 }
 
         try:
-            # 1. 実行プランの作成（非同期対応）
-            plan = await self._create_execution_plan(message)
+            # 1. クエリ分析
+            analysis_result = await self.query_analyzer.analyze_query_intent(message)
             
-            # 2. エージェント実行
+            # 2. 実行プランの作成
+            plan = await self.query_analyzer.create_execution_plan(analysis_result)
+            
+            # 3. エージェント実行
             response = self.agent_executor.invoke({"input": message, "user_id": user_id})
 
             if isinstance(response, dict) and "output" in response:
@@ -234,47 +218,6 @@ class MasterAgent:
                 'agent_used': 'master_agent',
                 'error': True
             }
-    
-    async def _create_execution_plan(self, message: str) -> str:
-        """
-        実行プランの作成（動的圃場名抽出対応）
-        AIエージェント構築のポイント: プラン共有機能
-        """
-        # より具体的なプラン生成ロジック
-        if any(keyword in message for keyword in ["登録", "追加", "新しい", "作成"]) and any(keyword in message for keyword in ["圃場", "ハウス", "畑"]):
-            # 圃場名を動的に抽出してプランに含める
-            field_name = await self._extract_field_name(message)
-            if field_name:
-                return f"📋 実行プラン\n1. 「{field_name}」を新規圃場として登録処理\n2. 面積・エリア情報を含めてデータベースに保存\n3. 登録完了通知をユーザーに送信"
-            else:
-                return "📋 実行プラン\n1. 圃場登録専門エージェント(FieldRegistrationAgent)で新しい圃場を登録\n2. 登録結果を確認してユーザーに報告"
-        elif any(keyword in message for keyword in ["圃場", "ハウス", "畑", "面積", "作付け"]):
-            # 圃場名や具体的な情報を動的に抽出
-            field_name = await self._extract_field_name(message)
-            if field_name:
-                if "面積" in message:
-                    return f"📋 実行プラン\n1. 「{field_name}」の面積情報をリサーチ\n2. 結果をha単位でユーザーにレポート"
-                elif "一覧" in message or "すべて" in message:
-                    area_name = self._extract_area_name(message)
-                    if area_name:
-                        return f"📋 実行プラン\n1. 「{area_name}」の圃場一覧をリサーチ\n2. 各圃場の面積・作付け状況をユーザーにレポート"
-                    else:
-                        return "📋 実行プラン\n1. 全圃場の一覧情報をリサーチ\n2. 面積・作付け状況を整理してユーザーにレポート"
-                else:
-                    return f"📋 実行プラン\n1. 「{field_name}」の詳細情報をリサーチ\n2. 面積・作付け・作業予定をユーザーにレポート"
-            else:
-                return "📋 実行プラン\n1. 圃場情報を専門エージェント(FieldAgent)で調査\n2. 結果をわかりやすく整理して報告"
-        elif any(keyword in message for keyword in ["タスク", "作業", "予定"]):
-            return "📋 実行プラン\n1. 今日の作業タスクをデータベースから検索\n2. 見つかったタスクの詳細をユーザーにレポート"
-        elif any(keyword in message for keyword in ["農薬", "資材", "希釈"]):
-            material_name = self._extract_material_name(message)
-            if material_name:
-                return f"📋 実行プラン\n1. 「{material_name}」の使用方法・希釈倍率をリサーチ\n2. 安全な使用指導をユーザーにレポート"
-            else:
-                return "📋 実行プラン\n1. 資材データベースから対象情報を検索\n2. 安全な使用方法と注意事項を確認\n3. 詳細情報を報告"
-        else:
-            query_type = self._analyze_query_type(message)
-            return f"📋 実行プラン\n1. 「{query_type}」について最適なツールで情報収集\n2. 結果を整理してユーザーにレポート"
 
     def process_message(self, message: str, user_id: str) -> str:
         """同期ラッパー関数（後方互換性のため）"""
@@ -288,85 +231,6 @@ class MasterAgent:
             # イベントループが実行されていない場合は非同期実行結果を取得
             result = asyncio.run(self.process_message_async(message, user_id))
             return result.get('response', 'エラーが発生しました')
-
-    async def _extract_field_name(self, message: str) -> str:
-        """メッセージから圃場名を動的に抽出"""
-        try:
-            from ..services.field_name_extractor import FieldNameExtractor
-            
-            extractor = FieldNameExtractor()
-            result = await extractor.extract_field_name(message)
-            
-            # 信頼度が50%以上の場合のみ採用
-            if result['confidence'] >= 0.5:
-                logger.info(f"動的圃場名抽出成功: {result['field_name']} (信頼度: {result['confidence']:.2f})")
-                return result['field_name']
-            else:
-                logger.info(f"動的圃場名抽出: 信頼度不足 ({result['confidence']:.2f})")
-                return ""
-                
-        except Exception as e:
-            logger.error(f"動的圃場名抽出エラー: {e}")
-            # フォールバック: 従来の正規表現方式
-            return self._extract_field_name_fallback(message)
-    
-    def _extract_field_name_fallback(self, message: str) -> str:
-        """フォールバック用の従来圃場名抽出"""
-        import re
-        
-        # 改良された正規表現パターン
-        field_patterns = [
-            r'「([^」]+)」',           # 「圃場名」
-            r'([^のを\s]{2,})の(?:面積|情報|詳細|状況)',  # 2文字以上の圃場名
-            r'([^のを\s]{2,})を(?:登録|追加)',         # 2文字以上の圃場名
-            r'([^のを\s]{2,})は(?:どこ|何)',           # 2文字以上の圃場名
-        ]
-        
-        for pattern in field_patterns:
-            match = re.search(pattern, message)
-            if match:
-                extracted = match.group(1)
-                if len(extracted) >= 2:  # 最小長チェック
-                    return extracted
-        
-        return ""
-
-    def _extract_area_name(self, message: str) -> str:
-        """メッセージからエリア名を抽出"""
-        if "豊糠" in message:
-            return "豊糠エリア"
-        elif "豊緑" in message:
-            return "豊緑エリア"
-        return ""
-
-    def _extract_material_name(self, message: str) -> str:
-        """メッセージから資材名を抽出"""
-        import re
-        
-        # 資材名のパターン
-        material_patterns = [
-            r'「([^」]+)」',  # 「農薬名」
-            r'([^の\s]+)の希釈',  # 農薬名の希釈
-            r'([^を\s]+)を',     # 農薬名を
-        ]
-        
-        for pattern in material_patterns:
-            match = re.search(pattern, message)
-            if match:
-                return match.group(1)
-        
-        return ""
-
-    def _analyze_query_type(self, message: str) -> str:
-        """クエリタイプを分析"""
-        if any(keyword in message for keyword in ["天気", "気温", "雨"]):
-            return "天気情報"
-        elif any(keyword in message for keyword in ["病気", "害虫", "症状"]):
-            return "病害虫診断"
-        elif any(keyword in message for keyword in ["収穫", "出荷", "販売"]):
-            return "収穫・出荷情報"
-        else:
-            return "農業全般の問い合わせ"
 
 
 # グローバルエージェントインスタンス
