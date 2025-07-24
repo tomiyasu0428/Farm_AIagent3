@@ -19,7 +19,7 @@ class DataAccessLayer:
 
     async def _get_collection(self, collection_name: str):
         """コレクション取得の共通メソッド"""
-        return self.mongodb_client.get_collection(collection_name)
+        return await self.mongodb_client.get_collection(collection_name)
 
     async def get_field_info(self, field_id: ObjectId) -> Dict[str, Any]:
         """圃場情報取得の共通メソッド"""
