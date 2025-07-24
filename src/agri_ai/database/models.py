@@ -78,17 +78,30 @@ class FieldDocument(BaseDocument):
     next_scheduled_work: Optional[Dict[str, Any]] = Field(None, description="次回予定作業")
 
 
-class WorkRecordDocument(BaseDocument):
-    """作業履歴モデル"""
+class WorkLogDocument(BaseDocument):
+    """作業記録モデル (work_logs_collection_schema.md に基づく)"""
+    log_id: str = Field(..., description="人間可読な記録ID")
+    user_id: str = Field(..., description="作業者のユーザーID")
+    work_date: datetime = Field(..., description="実際の作業実施日")
+    original_message: str = Field(..., description="ユーザーの元メッセージ")
     
-    field_id: PyObjectId = Field(..., description="圃場ID")
-    work_date: datetime = Field(..., description="作業日")
-    work_type: str = Field(..., description="作業種別")
-    worker: str = Field(..., description="作業者")
-    weather: Optional[Dict[str, Any]] = Field(None, description="天候情報")
-    materials_used: List[Dict[str, Any]] = Field(default_factory=list, description="使用資材")
-    work_details: Dict[str, Any] = Field(default_factory=dict, description="作業詳細")
-    next_work_scheduled: Optional[Dict[str, Any]] = Field(None, description="次回作業予定")
+    extracted_data: Dict[str, Any] = Field(default_factory=dict, description="構造化された抽出データ")
+    category: str = Field(..., description="作業分類")
+    subcategory: Optional[str] = Field(None, description="詳細分類")
+    tags: List[str] = Field(default_factory=list, description="検索用タグ配列")
+    
+    confidence: float = Field(0.0, description="情報抽出の信頼度 (0.0-1.0)")
+    extraction_method: str = Field("auto", description="抽出方法 (auto/manual/hybrid)")
+    status: str = Field("confirmed", description="記録状態 (draft/confirmed/reviewed)")
+    
+    review_status: Dict[str, Any] = Field(default_factory=dict, description="レビュー状態")
+    related_task_id: Optional[str] = Field(None, description="関連タスクID")
+    photo_urls: List[str] = Field(default_factory=list, description="作業写真URL配列")
+    attachments: List[Dict[str, Any]] = Field(default_factory=list, description="添付ファイル情報")
+    
+    source: str = Field("line_bot", description="データソース")
+    version: str = Field("1.0", description="スキーマバージョン")
+    sync_status: Dict[str, Any] = Field(default_factory=dict, description="同期状態")
 
 
 class AutoTaskDocument(BaseDocument):

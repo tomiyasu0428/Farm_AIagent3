@@ -90,20 +90,20 @@ class MasterAgent:
     def _initialize_specialized_agents(self):
         """専門エージェントの初期化"""
         from ..agents.field_agent import FieldAgent
-        from ..agents.field_registration_agent import FieldRegistrationAgent
+        from ..agents.work_log_registration_agent import WorkLogRegistrationAgent
         
         self.field_agent = FieldAgent()
-        self.field_registration_agent = FieldRegistrationAgent()
+        self.work_log_registration_agent = WorkLogRegistrationAgent()
         logger.info("専門エージェント初期化完了")
     
     def _initialize_tools(self):
         """ツールの初期化（AIエージェント構築のポイント: ツール削除なし）"""
         from ..langchain_tools.field_agent_tool import FieldAgentTool
-        from ..langchain_tools.field_registration_agent_tool import FieldRegistrationAgentTool
+        from ..langchain_tools.work_log_registration_agent_tool import WorkLogRegistrationAgentTool
         
         self.tools = [
             FieldAgentTool(self.field_agent),  # 圃場情報専門エージェント
-            FieldRegistrationAgentTool(self.field_registration_agent),  # 圃場登録専門エージェント
+            WorkLogRegistrationAgentTool(self.work_log_registration_agent), # 作業記録登録専門エージェント
         ]
 
     def _initialize_agent(self):
@@ -125,38 +125,20 @@ class MasterAgent:
     def _get_system_prompt(self) -> str:
         """システムプロンプトの取得"""
         return """
-あなたは農業管理を支援するAIエージェントです。
-農業従事者からのLINEでの問い合わせに対して、適切な農業作業の指示や情報を提供します。
+あなたは農業管理を支援するAIエージェントの司令塔「MasterAgent」です。
+あなたの主な役割は、ユーザーからの問い合わせを分析し、それを適切な専門エージェントに振り分けることです。
 
 利用可能なツール：
-1. field_agent_tool: 圃場情報専門エージェント（情報取得・検索）
-2. field_registration_agent_tool: 圃場登録専門エージェント（新規登録・追加）
+1. `field_agent_tool`: 圃場（畑やハウス）に関する情報の照会を担当します。「〇〇ハウスの状況は？」「A畑の面積を教えて」といった問い合わせに使用します。
+2. `work_log_registration_agent_tool`: 日々の作業報告を記録・保存します。「昨日トマトに薬を撒いた」「今日の収穫量は30kgだった」といった作業記録の登録に使用します。
 
-専門エージェント連携：
-- FieldAgent: 圃場情報の専門家
-  - 圃場の検索・情報取得
-  - エリア別圃場管理
-  - 作付け状況の管理
-- FieldRegistrationAgent: 圃場登録の専門家
-  - 新しい圃場の登録・追加
-  - エリア別圃場作成
-  - 圃場データの検証
+あなたの行動フロー:
+1. ユーザーの要求を分析します。
+2. 最も適した専門エージェントを選択します。
+3. 専門エージェントにタスクを依頼します。
+4. 専門エージェントからの報告を元に、最終的な回答を生成してユーザーに伝えます。
 
-主な責務：
-司令塔として適切な専門エージェントに作業を振り分けること
-
-対応方針：
-- 常に安全で正確な農業指導を心がけてください
-- 農薬使用については、適切な希釈倍率と使用制限を確認してください
-- 作業者のスキルレベルに応じて、分かりやすい指示を提供してください
-- 不明な点については、適切な確認を促してください
-- 作業完了の報告を受けた場合は、次回作業の自動スケジュールを提案してください
-
-回答形式：
-- LINEでの短いメッセージに適した簡潔な回答を心がけてください
-- 重要な情報は箇条書きで整理してください
-- 絵文字を適切に使用して、親しみやすい回答にしてください
-- 農薬の希釈倍率や使用制限は必ず確認してください
+あなたは直接的なデータベース検索や情報提供を行いません。必ず専門エージェントを通じてタスクを実行してください。
 """
 
     async def process_message_async(self, message: str, user_id: str) -> dict:
@@ -191,13 +173,11 @@ class MasterAgent:
                 }
 
         try:
-            # 1. クエリ分析
+            # 1. クエリ分析と実行プランの作成
             analysis_result = await self.query_analyzer.analyze_query_intent(message)
-            
-            # 2. 実行プランの作成
             plan = await self.query_analyzer.create_execution_plan(analysis_result)
             
-            # 3. エージェント実行
+            # 2. エージェント実行
             response = self.agent_executor.invoke({"input": message, "user_id": user_id})
 
             if isinstance(response, dict) and "output" in response:
