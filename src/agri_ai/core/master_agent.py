@@ -91,19 +91,23 @@ class MasterAgent:
         """専門エージェントの初期化"""
         from ..agents.field_agent import FieldAgent
         from ..agents.work_log_registration_agent import WorkLogRegistrationAgent
+        from ..agents.work_log_search_agent import WorkLogSearchAgent
         
         self.field_agent = FieldAgent()
         self.work_log_registration_agent = WorkLogRegistrationAgent()
+        self.work_log_search_agent = WorkLogSearchAgent()
         logger.info("専門エージェント初期化完了")
     
     def _initialize_tools(self):
         """ツールの初期化（AIエージェント構築のポイント: ツール削除なし）"""
         from ..langchain_tools.field_agent_tool import FieldAgentTool
         from ..langchain_tools.work_log_registration_agent_tool import WorkLogRegistrationAgentTool
+        from ..langchain_tools.work_log_search_agent_tool import WorkLogSearchAgentTool
         
         self.tools = [
             FieldAgentTool(self.field_agent),  # 圃場情報専門エージェント
             WorkLogRegistrationAgentTool(self.work_log_registration_agent), # 作業記録登録専門エージェント
+            WorkLogSearchAgentTool(), # 作業記録検索専門エージェント
         ]
 
     def _initialize_agent(self):
@@ -131,6 +135,7 @@ class MasterAgent:
 利用可能なツール：
 1. `field_agent_tool`: 圃場（畑やハウス）に関する情報の照会を担当します。「〇〇ハウスの状況は？」「A畑の面積を教えて」といった問い合わせに使用します。
 2. `work_log_registration_agent_tool`: 日々の作業報告を記録・保存します。「昨日トマトに薬を撒いた」「今日の収穫量は30kgだった」といった作業記録の登録に使用します。
+3. `work_log_search`: 過去の作業記録を検索し、ユーザーの質問に答えます。「先週の作業記録を教えて」「トマトの防除履歴は？」といった問い合わせに使用します。
 
 あなたの行動フロー:
 1. ユーザーの要求を分析します。

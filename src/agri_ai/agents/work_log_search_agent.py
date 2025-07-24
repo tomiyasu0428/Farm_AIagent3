@@ -11,6 +11,7 @@ from typing import Dict, List
 from ..core.base_agent import BaseAgent
 from ..services.master_data_resolver import MasterDataResolver
 from ..database.mongodb_client import create_mongodb_client
+from ..database.data_access import DataAccessLayer
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class WorkLogSearchAgent(BaseAgent):
     def __init__(self):
         super().__init__()
         self.master_resolver = MasterDataResolver()
+        self.data_access = DataAccessLayer(create_mongodb_client())
     
     def _setup_llm(self):
         """LLM設定（軽量化）"""
@@ -288,56 +290,9 @@ class WorkLogSearchAgent(BaseAgent):
     
     async def _execute_search(self, params: Dict, user_id: str) -> List[Dict]:
         """パラメータに基づいてデータベース検索を実行"""
-        client = create_mongodb_client()
-        try:
-            await client.connect()
-            work_logs_collection = await client.get_collection('work_logs')
-            
-            # 検索クエリの構築
-            query = {'user_id': user_id}
-            
-            # 日付範囲フィルタ
-            if params.get('date_range'):
-                date_range = params['date_range']
-                query['work_date'] = {
-                    '$gte': date_range['start'],
-                    '$lte': date_range['end']
-                }
-            
-            # 圃場フィルタ
-            if params.get('field_names'):
-                field_conditions = []
-                for field_name in params['field_names']:
-                    field_conditions.extend([
-                        {'extracted_data.field_name': {'$regex': field_name, '$options': 'i'}},
-                        {'original_message': {'$regex': field_name, '$options': 'i'}}
-                    ])
-                if field_conditions:
-                    query['$or'] = field_conditions
-            
-            # 作業種別フィルタ
-            if params.get('work_categories'):
-                query['category'] = {'$in': params['work_categories']}
-            
-            # 検索実行
-            cursor = work_logs_collection.find(query)
-            
-            # ソート
-            if params.get('sort_order') == 'desc':
-                cursor = cursor.sort('work_date', -1)
-            else:
-                cursor = cursor.sort('work_date', 1)
-            
-            # 件数制限
-            cursor = cursor.limit(params.get('limit', 50))
-            
-            results = await cursor.to_list(None)
-            logger.info(f"作業記録検索結果: {len(results)}件")
-            
-            return results
-            
-        finally:
-            await client.disconnect()
+        results = await self.data_access.search_work_logs(params, user_id)
+        logger.info(f"WorkLogSearchAgent: 作業記録検索結果: {len(results)}件")
+        return results
     
     async def _analyze_results(self, results: List[Dict], params: Dict) -> Dict[str, any]:
         """検索結果を分析・集計"""
@@ -508,6 +463,25 @@ class WorkLogSearchAgent(BaseAgent):
                 'extracted_data': record.get('extracted_data', {}),
                 'created_at': record['created_at'].strftime('%Y-%m-%d %H:%M')
             }
+            # Add a human-readable summary
+            summary_parts = []
+            summary_parts.append(f"日付: {formatted_record['work_date']}")
+
+            extracted_data = formatted_record['extracted_data']
+            field_name = extracted_data.get('field_name')
+            if field_name:
+                summary_parts.append(f"圃場: {field_name}")
+
+            work_content = extracted_data.get('work_content')
+            if work_content:
+                summary_parts.append(f"作業内容: {work_content}")
+            elif formatted_record['category']:
+                summary_parts.append(f"作業カテゴリ: {formatted_record['category']}")
+            
+            if not work_content and not formatted_record['category']:
+                summary_parts.append(f"メッセージ: {formatted_record['original_message']}")
+
+            formatted_record['summary'] = " ".join(summary_parts)
             formatted_results.append(formatted_record)
         
         return {
