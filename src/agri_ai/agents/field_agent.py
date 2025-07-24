@@ -53,6 +53,8 @@ class FieldAgent:
     
     def _setup_tools(self) -> List[Any]:
         """ツールの設定 - 圃場情報取得専用"""
+        from ..langchain_tools.field_info_tool import FieldInfoTool
+        
         return [
             FieldInfoTool(),           # 圃場情報取得
         ]
