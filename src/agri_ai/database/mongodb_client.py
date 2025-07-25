@@ -32,9 +32,13 @@ class MongoDBClient:
         
     async def connect(self) -> None:
         """MongoDB接続の確立"""
+        # 既存のクライアントがあっても新しいイベントループでは再作成する
         if self.client is not None:
-            logger.debug("MongoDB接続は既に確立されています")
-            return
+            # 古いクライアントを閉じる
+            try:
+                self.client.close()
+            except:
+                pass
             
         try:
             mongo_settings = settings.mongodb

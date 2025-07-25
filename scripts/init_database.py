@@ -5,6 +5,7 @@
 
 import asyncio
 import os
+import sys
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,6 +13,12 @@ from bson import ObjectId
 
 # 環境変数を読み込み
 load_dotenv()
+
+# Add project root to allow importing from the root directory
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from add_field_data import add_field_data
+
 
 async def init_database():
     """データベースの初期化"""
@@ -32,6 +39,9 @@ async def init_database():
         await create_scheduled_tasks_collection(db)
         await create_workers_collection(db)
         
+        # 圃場データを追加
+        await add_field_data()
+
         print("✅ データベースの初期化が完了しました！")
         
         # 接続を閉じる

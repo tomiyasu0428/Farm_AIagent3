@@ -33,10 +33,14 @@ async def root():
 async def health_check():
     """詳細なヘルスチェック"""
     try:
-        # MongoDB接続チェック
-        from ..database.mongodb_client import mongodb_client
-
-        db_health = await mongodb_client.health_check()
+        # MongoDB接続チェック（新しい接続を作成）
+        from ..database.mongodb_client import create_mongodb_client
+        
+        test_client = create_mongodb_client()
+        db_health = await test_client.health_check()
+        
+        # テスト用クライアントを閉じる
+        await test_client.disconnect()
 
         return {
             "status": "healthy",
