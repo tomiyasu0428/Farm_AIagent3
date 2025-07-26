@@ -46,7 +46,7 @@ class WorkLogRegistrationAgentTool(AgriAIBaseTool):
             self._work_log_registration_agent = WorkLogRegistrationAgent()
         return self._work_log_registration_agent
 
-    async def _arun(self, query: str, **kwargs) -> str:
+    async def _arun(self, query: str = "", **kwargs) -> str:
         """非同期実行（AgriAIBaseToolと互換性を保つ）"""
         # kwargs から message と user_id を取得
         message = kwargs.get('message', query)
