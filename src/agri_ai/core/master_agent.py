@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class MasterAgent:
     """
     農業AI司令塔エージェント
-    
+
     役割:
     - ユーザー指示の解釈と分析
     - 適切な専門エージェントへのタスク委譲
@@ -39,6 +39,9 @@ class MasterAgent:
         self.field_agent = None  # 圃場専門エージェント
         self.execution_plan = None  # 実行プラン
         self.query_analyzer = QueryAnalyzer()  # クエリ分析サービス
+        
+        # 初期化を実行
+        self.initialize()
 
     def initialize(self):
         """エージェントの初期化"""
@@ -74,7 +77,7 @@ class MasterAgent:
 
         # 専門エージェントの初期化
         self._initialize_specialized_agents()
-        
+
         # ツールの初期化
         self._initialize_tools()
 
@@ -92,22 +95,22 @@ class MasterAgent:
         from ..agents.field_agent import FieldAgent
         from ..agents.work_log_registration_agent import WorkLogRegistrationAgent
         from ..agents.work_log_search_agent import WorkLogSearchAgent
-        
+
         self.field_agent = FieldAgent()
         self.work_log_registration_agent = WorkLogRegistrationAgent()
         self.work_log_search_agent = WorkLogSearchAgent()
         logger.info("専門エージェント初期化完了")
-    
+
     def _initialize_tools(self):
         """ツールの初期化（AIエージェント構築のポイント: ツール削除なし）"""
         from ..langchain_tools.field_agent_tool import FieldAgentTool
         from ..langchain_tools.work_log_registration_agent_tool import WorkLogRegistrationAgentTool
         from ..langchain_tools.work_log_search_agent_tool import WorkLogSearchAgentTool
-        
+
         self.tools = [
             FieldAgentTool(self.field_agent),  # 圃場情報専門エージェント
-            WorkLogRegistrationAgentTool(self.work_log_registration_agent), # 作業記録登録専門エージェント
-            WorkLogSearchAgentTool(), # 作業記録検索専門エージェント
+            WorkLogRegistrationAgentTool(),  # 作業記録登録専門エージェント
+            WorkLogSearchAgentTool(),  # 作業記録検索専門エージェント
         ]
 
     def _initialize_agent(self):
@@ -149,7 +152,7 @@ class MasterAgent:
     async def process_message_async(self, message: str, user_id: str) -> dict:
         """
         非同期でユーザーからのメッセージを処理し、応答を生成する
-        
+
         Returns:
             dict: {
                 'response': str,      # ユーザーへの応答
@@ -160,9 +163,9 @@ class MasterAgent:
         if not self.agent_executor:
             logger.error("エージェントが初期化されていません。")
             return {
-                'response': "申し訳ございません。システムの準備ができていません。少し待ってから再度お試しください。",
-                'agent_used': 'master_agent',
-                'error': True
+                "response": "申し訳ございません。システムの準備ができていません。少し待ってから再度お試しください。",
+                "agent_used": "master_agent",
+                "error": True,
             }
 
         # MongoDB接続確認
@@ -172,16 +175,16 @@ class MasterAgent:
             except Exception as e:
                 logger.error(f"MongoDB接続エラー: {e}")
                 return {
-                    'response': "データベース接続エラーが発生しました。しばらくしてから再度お試しください。",
-                    'agent_used': 'master_agent',
-                    'error': True
+                    "response": "データベース接続エラーが発生しました。しばらくしてから再度お試しください。",
+                    "agent_used": "master_agent",
+                    "error": True,
                 }
 
         try:
             # 1. クエリ分析と実行プランの作成
             analysis_result = await self.query_analyzer.analyze_query_intent(message)
             plan = await self.query_analyzer.create_execution_plan(analysis_result)
-            
+
             # 2. エージェント実行
             response = self.agent_executor.invoke({"input": message, "user_id": user_id})
 
@@ -189,24 +192,21 @@ class MasterAgent:
                 final_response = response["output"]
             else:
                 final_response = str(response)
-                
-            return {
-                'response': final_response,
-                'plan': plan,
-                'agent_used': 'master_agent'
-            }
+
+            return {"response": final_response, "plan": plan, "agent_used": "master_agent"}
 
         except Exception as e:
             logger.error(f"メッセージ処理エラー: {e}")
             return {
-                'response': "申し訳ございません。処理中にエラーが発生しました。しばらくしてから再度お試しください。",
-                'agent_used': 'master_agent',
-                'error': True
+                "response": "申し訳ございません。処理中にエラーが発生しました。しばらくしてから再度お試しください。",
+                "agent_used": "master_agent",
+                "error": True,
             }
 
     def process_message(self, message: str, user_id: str) -> str:
         """同期ラッパー関数（後方互換性のため）"""
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
             # 既にイベントループが実行中の場合は同期実行できない
@@ -215,7 +215,7 @@ class MasterAgent:
         except RuntimeError:
             # イベントループが実行されていない場合は非同期実行結果を取得
             result = asyncio.run(self.process_message_async(message, user_id))
-            return result.get('response', 'エラーが発生しました')
+            return result.get("response", "エラーが発生しました")
 
 
 # グローバルエージェントインスタンス

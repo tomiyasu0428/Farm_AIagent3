@@ -16,10 +16,9 @@ class DatabaseConnection:
     
     async def get_client(self) -> MongoDBClient:
         """MongoDB クライアントを取得"""
-        if self._client is None:
+        # 常に新しいクライアントを作成してイベントループ問題を回避
+        if self._client is None or not self._client.is_connected:
             self._client = create_mongodb_client()
-        
-        if not self._client.is_connected:
             await self._client.connect()
         
         return self._client
@@ -37,6 +36,6 @@ _db_connection: Optional[DatabaseConnection] = None
 def get_database_connection() -> DatabaseConnection:
     """データベース接続を取得"""
     global _db_connection
-    if _db_connection is None:
-        _db_connection = DatabaseConnection()
+    # イベントループ問題を回避するため常に新しいインスタンスを作成
+    _db_connection = DatabaseConnection()
     return _db_connection
