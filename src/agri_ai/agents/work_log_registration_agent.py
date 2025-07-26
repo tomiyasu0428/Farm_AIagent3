@@ -175,7 +175,8 @@ class WorkLogRegistrationAgent:
     
     def _parse_work_date(self, message: str, extracted_info: Dict) -> datetime:
         """作業日の解釈"""
-        today = datetime.now().date()
+        # datetime.date ではなく datetime.datetime を使用
+        today = datetime.now() 
         
         relative_date = extracted_info.get('relative_date', '')
         

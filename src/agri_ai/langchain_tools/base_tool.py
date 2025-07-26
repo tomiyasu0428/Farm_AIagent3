@@ -28,7 +28,7 @@ class AgriAIBaseTool(BaseTool, ABC):
             # グローバルインスタンスを使用
             self.mongodb_client = mongodb_client
 
-    def _run(self, query: str, **kwargs: Any) -> Any:
+    def _run(self, query: str = "", **kwargs: Any) -> Any:
         """同期的にツールを実行する"""
         import concurrent.futures
         import threading
